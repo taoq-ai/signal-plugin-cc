@@ -5,8 +5,9 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
 
 - **Permission prompts:** the bot sends you the tool and its command or file. React 👍 or reply `y` to allow;
   react 👎 or reply `n` to deny, or reply anything else to deny and tell Claude why ("use the test database").
-- **Questions (AskUserQuestion):** the bot sends the questions with numbered options. Reply one line per
-  question with an option number (`1,3` for multi-select) or your own answer.
+- **Questions (AskUserQuestion):** the bot sends the questions with their options, plus a poll per question.
+  Tap the poll, quote a question's poll with an option number, its label or your own answer, or reply one line
+  per open question. Answers can come in any order; after the last one you get a ✓ receipt and the polls close.
 - **Waiting for input:** when a session finishes and waits for you, the bot tells you.
 
 It only relays while you're away: if your Mac has had keyboard or mouse input in the last 60 seconds, Claude Code

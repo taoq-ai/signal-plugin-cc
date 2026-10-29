@@ -6,7 +6,7 @@ import sys
 import traceback
 
 from . import presence
-from .ask import ask
+from .ask import PARTIAL, ask
 from .config import Config
 from .daemon import Daemon
 
@@ -35,18 +35,20 @@ def permission(cfg, hook):
     what = f"{inp['description']}\n" if inp.get("description") else ""
     text = (f"{tool} in {project(hook)}:\n{what}{detail[:600]}\n\n"
             "React \N{THUMBS UP SIGN} or reply y to allow; \N{THUMBS DOWN SIGN}, n or a reason to deny.")
-    decision = ask(cfg, text, decide)
+    decision = ask(cfg, text, lambda reply, target: decide(reply.text) if reply.text else None,
+                   confirm=lambda d: "Allowed" if d["behavior"] == "allow" else d["message"])
     return decision and {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                                 "decision": decision}}
 
 
 def pick(q, row):
-    """An option number (several for multi-select) becomes its label; anything else is a free answer."""
+    """Option numbers (several for multi-select) or an option's label become the label; anything else
+    is a free answer."""
+    labels = [o["label"] for o in q["options"]]
     nums = [n.strip() for n in row.split(",")]
-    if all(n.isdigit() and 1 <= int(n) <= len(q["options"]) for n in nums) \
-            and (q.get("multiSelect") or len(nums) == 1):
-        return ", ".join(q["options"][int(n) - 1]["label"] for n in nums)
-    return row
+    if all(n.isdigit() and 1 <= int(n) <= len(labels) for n in nums) and (q.get("multiSelect") or len(nums) == 1):
+        return ", ".join(labels[int(n) - 1] for n in nums)
+    return next((label for label in labels if label.lower() == row.lower()), row)
 
 
 def question(cfg, hook):
@@ -57,15 +59,34 @@ def question(cfg, hook):
         lines.append(f"\n{i}. {q['question']}" + (" (several: 1,3)" if q.get("multiSelect") else ""))
         lines += [f"  {j}) {o['label']}" + (f" - {o['description']}" if o.get("description") else "")
                   for j, o in enumerate(q["options"], 1)]
-    lines.append("\nReply one line per question: an option number, or your own answer.")
+    lines.append("\nTap the poll below, or reply with an option number or your own answer"
+                 + (" (one line per question, or quote a question's poll)." if len(qs) > 1 else "."))
+    got = {}
 
-    def parse(reply):
-        rows = [reply] if len(qs) == 1 else [r.strip() for r in reply.splitlines() if r.strip()]
-        if len(rows) != len(qs):
+    def parse(reply, target):
+        """Answers arrive in any order: a poll vote, a reply quoting a poll, or lines for the open questions."""
+        if target is not None:
+            q = qs[target]
+            if reply.votes is not None:
+                got[q["question"]] = ", ".join(q["options"][i]["label"] for i in sorted(set(reply.votes))
+                                               if i < len(q["options"]))
+            else:
+                got[q["question"]] = pick(q, reply.text)
+        elif reply.text:
+            todo = [q for q in qs if q["question"] not in got]
+            rows = [reply.text] if len(todo) == 1 else [r.strip() for r in reply.text.splitlines() if r.strip()]
+            if not todo or len(rows) > len(todo):
+                return None
+            got.update({q["question"]: pick(q, row) for q, row in zip(todo, rows)})
+        else:
             return None
-        return {q["question"]: pick(q, row) for q, row in zip(qs, rows)}
+        return dict(got) if len(got) == len(qs) else PARTIAL
 
-    answers = ask(cfg, "\n".join(lines), parse)
+    polls = [(f"({i}/{len(qs)}) {q['question']}" if len(qs) > 1 else q["question"],
+              [o["label"] for o in q["options"]], bool(q.get("multiSelect")))
+             for i, q in enumerate(qs, 1)]
+    answers = ask(cfg, "\n".join(lines), parse, polls,
+                  confirm=lambda a: "; ".join(f"{k} \N{RIGHTWARDS ARROW} {v}" for k, v in a.items()))
     return answers and {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "allow",
         "updatedInput": {**hook["tool_input"], "answers": answers}}}

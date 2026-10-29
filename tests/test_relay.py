@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from signal_cc import hooks, presence  # noqa: E402
+from signal_cc import ask, hooks, presence  # noqa: E402
 from signal_cc.config import Config  # noqa: E402
 
 OWNER = "+15550000001"
@@ -24,9 +24,11 @@ class Daemon(BaseHTTPRequestHandler):
     """Records sends; answers each prompt with the next scripted reply(message, timestamp) -> (text, quote).
 
     In Note to Self mode the reply arrives as a sync of a message sent to the owner, as from the phone;
-    a script may return (text, quote, destination) to sync a message sent to someone else.
+    a script may return (text, quote, destination) to sync a message sent to someone else, a dict as
+    text to send that message body (a vote, a reaction), or None to stay silent. Polls count as sends
+    (their question as the message); receipts and timeouts never get a reply.
     """
-    sent, params, script, events = [], [], [], queue.Queue()
+    sent, params, script, events, ended, fail_polls = [], [], [], queue.Queue(), [], False
 
     def do_GET(self):
         self.send_response(200)
@@ -39,12 +41,20 @@ class Daemon(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        message = body["params"]["message"]
+        method, params = body["method"], body["params"]
+        if method == "sendPollTerminate":
+            Daemon.ended.append(params["pollTimestamp"])
+            return self.answer(body, {})
+        if method == "sendPollCreate" and Daemon.fail_polls:
+            return self.answer(body, None, {"code": -1, "message": "poll too long"})
+        message = params.get("message") or params["question"]
         Daemon.sent.append(message)
-        Daemon.params.append(body["params"])
+        Daemon.params.append(params)
         ts = 1000 + len(Daemon.sent)
-        if Daemon.script and "Timed out" not in message:
-            text, quote, *dest = Daemon.script.pop(0)(message, ts)
+        scripted = Daemon.script.pop(0)(message, ts) \
+            if Daemon.script and "Timed out" not in message and "\N{CHECK MARK}" not in message else None
+        if scripted:
+            text, quote, *dest = scripted
             msg = text if isinstance(text, dict) else {"message": text, **({"quote": {"id": quote}} if quote else {})}
             if body["params"].get("noteToSelf"):
                 env = {"syncMessage": {"sentMessage": {"destinationNumber": (dest or [OWNER])[0], **msg}}}
@@ -52,7 +62,11 @@ class Daemon(BaseHTTPRequestHandler):
                 env = {"dataMessage": msg}
             Daemon.events.put({"jsonrpc": "2.0", "method": "receive",
                                "params": {"envelope": {"sourceNumber": OWNER, **env}}})
-        out = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": {"timestamp": ts}}).encode()
+        self.answer(body, {"timestamp": ts})
+
+    def answer(self, body, result, error=None):
+        reply = {"jsonrpc": "2.0", "id": body["id"], **({"error": error} if error else {"result": result})}
+        out = json.dumps(reply).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -80,6 +94,9 @@ class RelayTest(unittest.TestCase):
         Daemon.sent.clear()
         Daemon.params.clear()
         Daemon.script.clear()
+        Daemon.ended.clear()
+        Daemon.fail_polls = False
+        ask.SETTLE = 0.3
         Daemon.events = queue.Queue()
         self.tmp = tempfile.TemporaryDirectory()
         presence.idle_seconds = lambda: 1000  # away from the Mac
@@ -168,21 +185,46 @@ class RelayTest(unittest.TestCase):
         finally:
             ask.secrets.token_hex = real
 
-    def test_questions_answered_with_numbers_and_free_text(self):
+    def test_questions_answered_by_votes_and_quoted_replies_in_any_order(self):
         qs = [{"question": "Which db?", "header": "DB", "multiSelect": False,
                "options": [{"label": "Postgres", "description": "SQL"}, {"label": "Mongo", "description": "Docs"}]},
               {"question": "Which checks?", "header": "Checks", "multiSelect": True,
                "options": [{"label": "lint", "description": ""}, {"label": "tests", "description": ""}]},
               {"question": "Name?", "header": "Name", "multiSelect": False,
                "options": [{"label": "a", "description": ""}, {"label": "b", "description": ""}]}]
-        Daemon.script += [lambda m, ts: ("2", ts),  # wrong line count: asked again
-                          lambda m, ts: ("2\n1, 2\nmy own name", ts)]
-        out = hooks.question(self.cfg, {"tool_input": {"questions": qs}})["hookSpecificOutput"]
+
+        def vote(*picked):
+            return lambda m, ts: ({"pollVote": {"targetSentTimestamp": ts, "optionIndexes": list(picked)}}, None)
+        Daemon.script += [lambda m, ts: None,  # the text message: no reply
+                          vote(1), vote(1, 0),  # tap poll 1, tick two boxes in poll 2 (in either order)
+                          lambda m, ts: ("my own name", ts)]  # quote poll 3 with a free answer
+        out = hooks.question(self.cfg, {"cwd": "/x/proj", "tool_input": {"questions": qs}})["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "allow")
         self.assertEqual(out["updatedInput"]["questions"], qs)
         self.assertEqual(out["updatedInput"]["answers"],
                          {"Which db?": "Mongo", "Which checks?": "lint, tests", "Name?": "my own name"})
-        self.assertIn("Couldn't read", Daemon.sent[1])
+        self.assertEqual([p.get("noMulti") for p in Daemon.params[1:4]], [True, False, True])
+        self.assertIn("(2/3) Which checks?", Daemon.sent[2])
+        self.assertEqual(sorted(Daemon.ended), [1002, 1003, 1004])  # every poll closed
+        self.assertIn("\N{CHECK MARK} Which db? \N{RIGHTWARDS ARROW} Mongo", Daemon.sent[-1])
+
+    def test_questions_answered_by_lines_and_labels(self):
+        qs = [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]},
+              {"question": "Name?", "options": [{"label": "a"}, {"label": "b"}]}]
+        Daemon.script += [lambda m, ts: ("1\n2\n3", None),  # more lines than questions: asked again
+                          lambda m, ts: None, lambda m, ts: None,  # the polls
+                          lambda m, ts: ("mongo\nB", None)]  # labels, in any case
+        out = hooks.question(self.cfg, {"tool_input": {"questions": qs}})["hookSpecificOutput"]
+        self.assertEqual(out["updatedInput"]["answers"], {"Which db?": "Mongo", "Name?": "b"})
+        self.assertIn("Couldn't read", Daemon.sent[3])
+
+    def test_questions_fall_back_to_text_when_polls_fail(self):
+        Daemon.fail_polls = True
+        qs = [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]}]
+        Daemon.script.append(lambda m, ts: ("2", None))
+        out = hooks.question(self.cfg, {"tool_input": {"questions": qs}})["hookSpecificOutput"]
+        self.assertEqual(out["updatedInput"]["answers"], {"Which db?": "Mongo"})
+        self.assertEqual(Daemon.ended, [])
 
     def test_at_the_mac_nothing_is_sent(self):
         presence.idle_seconds = lambda: 5
