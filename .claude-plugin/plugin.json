@@ -1,6 +1,6 @@
 {
   "name": "signal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "Answer Claude Code permission prompts and questions from Signal while you're away from your Mac.",
   "homepage": "https://github.com/taoq-ai/signal-plugin-cc",

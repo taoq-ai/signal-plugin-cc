@@ -128,10 +128,23 @@ class DeskTest(unittest.TestCase):
         m, registry = FakeMessenger(), FakeRegistry(Waiting(0, OTHER, "Bash in other:"))
         for reply in (Reply("Status"), Reply("y"), Reply("status", 1001), None):
             m.replies.put(reply)
-        desk.serve(m, registry)
+        desk.serve(m, registry, FakePresence())
         self.assertEqual(len(m.sent), 1)
         self.assertIn(f"Waiting for you (1):\n[{OTHER}] Bash in other:", m.sent[0])
         self.assertEqual(registry.latest(), OTHER)  # a plain reply to the status is for that prompt
+
+    def test_away_and_back_flip_the_switch_and_status_shows_it(self):
+        m, registry, presence = FakeMessenger(), FakeRegistry(Waiting(0, OTHER, "Bash in other:")), FakePresence()
+        seen = []
+        registry.mark_latest(OTHER)
+        m.send = lambda text: seen.append((text, presence.switch_on(), registry.latest())) or 1
+        for reply in (Reply("away"), Reply("status"), Reply("away", 1001), Reply("Back"), Reply("status"), None):
+            m.replies.put(reply)
+        desk.serve(m, registry, presence)
+        self.assertEqual([(t.splitlines()[-1], on) for t, on, _ in seen],
+                         [(texts.AWAY_ON, True), (texts.AWAY_ON, True), (texts.AWAY_OFF, False),
+                          (texts.AWAY_OFF, False)])  # the quoted away is an answer, not a command
+        self.assertEqual(seen[0][2], "")  # a plain reply to the confirmation is for no prompt
 
 
 if __name__ == "__main__":
