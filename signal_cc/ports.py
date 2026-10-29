@@ -39,6 +39,30 @@ class Registry(Protocol):
         """Record the tag of the message about to be sent."""
 
 
+class Gathering(Protocol):
+    """The finished sessions waiting for the owner to leave, shared by every session on the Mac, so that the
+    sessions that finish together send one digest. An entry is a dict: created, project, first (its digest
+    line), sent (when its own message or a digest went out, or None) and digest (the digest it is in, or None)."""
+
+    def enter(self, tag: str, project: str, first: str) -> None:
+        """Add the finished session's prompt, tagged tag."""
+
+    def entries(self) -> dict:
+        """Every entry, by tag."""
+
+    def update(self, tag: str, **fields) -> None:
+        """Change fields of an entry, if it is still there."""
+
+    def leave(self, tag: str) -> None:
+        """The prompt is done."""
+
+    def lead(self) -> bool:
+        """Take the lead of the next digest, unless another listener holds it."""
+
+    def unlead(self) -> None:
+        """Let the lead go."""
+
+
 class Journal(Protocol):
     """A local record of how each relayed prompt ended. Entries never hold message text or numbers."""
 

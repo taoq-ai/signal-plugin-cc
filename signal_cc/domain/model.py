@@ -11,6 +11,10 @@ Waiting = namedtuple("Waiting", "created tag summary")
 # A poll beside a prompt's text: the question, the option labels, and whether several may be picked.
 Poll = namedtuple("Poll", "question options multi")
 
+# A digest message, shared by its members (tags, oldest first): its text (poll None), or its poll, whose options
+# are the tags in poll.
+Digest = namedtuple("Digest", "tags poll")
+
 PARTIAL = object()  # a form took the reply, but answers are still missing
 
 # Why hooks.quiet stopped a session's listener, each also the relay.log outcome of the prompt it held

@@ -53,6 +53,56 @@ class FakeMessenger:
         return self.replies, lambda: None
 
 
+class Chat(FakeMessenger):
+    """One Signal chat seen by several listeners: every subscriber gets every reply posted."""
+
+    def __init__(self):
+        super().__init__()
+        self.queues, self.lock = [], threading.Lock()
+
+    def _out(self, text):
+        with self.lock:
+            return super()._out(text)
+
+    def subscribe(self):
+        q = queue.Queue()
+        self.queues.append(q)
+        return q, lambda: None
+
+    def post(self, reply):
+        for q in self.queues:
+            q.put(reply)
+
+
+class FakeGathering:
+    """The finished sessions that wait for the owner to leave, and the lead of the next digest."""
+
+    def __init__(self):
+        self.rows, self.lock = {}, threading.Lock()
+
+    def enter(self, tag, project, first):
+        self.rows[tag] = {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None}
+
+    def entries(self):
+        return {tag: dict(row) for tag, row in list(self.rows.items())}
+
+    def update(self, tag, **fields):
+        if tag in self.rows:
+            self.rows[tag].update(fields)
+
+    def leave(self, tag):
+        self.rows.pop(tag, None)
+
+    def lead(self):
+        return self.lock.acquire(blocking=False)
+
+    def unlead(self):
+        self.lock.release()
+
+
+CLAIMS = threading.Lock()
+
+
 class FakeRegistry:
     def __init__(self, *others):
         self.live = {w.tag: w for w in others}
@@ -61,8 +111,9 @@ class FakeRegistry:
         self.n = 0
 
     def claim(self, summary, ttl):
-        self.n += 1
-        tag = f"{self.n:04x}"
+        with CLAIMS:  # listeners in threads claim at once
+            self.n += 1
+            tag = f"{self.n:04x}"
         self.live[tag] = Waiting(10_000_000_000 + self.n, tag, summary)  # newer than any test fixture
         self.expires[tag] = time.time() + ttl
         return tag

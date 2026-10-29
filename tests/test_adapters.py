@@ -16,11 +16,12 @@ from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
 from signal_cc.adapters import files, macos, processes
-from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
+from signal_cc.adapters.files import AwaySwitch, DeskLock, FileGathering, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
-from signal_cc.entry import hooks
+from signal_cc.domain.forms import ContinueForm
+from signal_cc.entry import hooks, wiring
 
 
 class Base(unittest.TestCase):
@@ -37,7 +38,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         macos.idle_seconds = lambda: 1000  # away from the Mac
-        conversation.SETTLE, conversation.POLL = 0.3, 0.05
+        conversation.SETTLE, conversation.POLL, conversation.GATHER, conversation.STEP = 0.3, 0.05, 0.3, 0.02
         self.cfg = Config(owner=OWNER, bot="+15550000002", home=self.home, port=self.server.server_port, wait=10)
         env = mock.patch.dict(os.environ)  # the run the tests run in must not decide whether a session is headless
         env.start()
@@ -139,6 +140,24 @@ class FilesTest(Base):
         first.release()
         self.assertTrue(second.acquire())
         second.release()
+
+    def test_gathering_shares_entries_between_listeners_and_one_lead(self):
+        first, second = FileGathering(self.home), FileGathering(self.home)
+        first.enter("aaaa", "proj", "Done.")
+        second.update("aaaa", sent=5.0)
+        second.update("bbbb", sent=1.0)  # left already: not brought back
+        (self.home / "gather" / "cccc").write_text("{not json")  # half written: skipped
+        self.assertEqual(list(second.entries()), ["aaaa"])
+        row = second.entries()["aaaa"]
+        self.assertEqual((row["project"], row["first"], row["sent"], row["digest"]), ("proj", "Done.", 5.0, None))
+        self.assertTrue(first.lead())
+        self.assertFalse(second.lead())
+        first.unlead()
+        self.assertTrue(second.lead())
+        second.unlead()
+        first.leave("aaaa")
+        first.leave("aaaa")
+        self.assertEqual(second.entries(), {})
 
     def test_stop_ends_a_relay_process_and_nothing_else(self):
         fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "relay.py"])
@@ -274,6 +293,27 @@ class HooksTest(Base):
         self.assertEqual(woke.exception.code, 2)
         self.assertIn("run the tests too", err.getvalue())
         self.assertIsNone(Listeners(self.home).get("s1"))
+
+    def test_two_listeners_wired_to_real_files_send_one_digest(self):
+        threads = [threading.Thread(target=conversation.continue_session,
+                                    args=(wiring.conversation(self.cfg, s), ContinueForm("Done.", p), 5, 10))
+                   for s, p in (("s1", "p1"), ("s2", "p2"))]
+        for t in threads:
+            t.start()
+        for _ in range(250):
+            if len(StubDaemon.calls) >= 2:
+                break
+            time.sleep(0.02)
+        time.sleep(0.3)
+        StubDaemon.events.put(None)
+        StubDaemon.events.put(None)
+        for t in threads:
+            t.join(5)
+        methods = [m for m, _ in StubDaemon.calls]
+        self.assertEqual(methods[:2], ["send", "sendPollCreate"])
+        self.assertNotIn("send", methods[2:])
+        self.assertTrue(StubDaemon.calls[0][1]["message"].startswith("2 sessions finished:\n["))
+        self.assertEqual(list((self.home / "gather").iterdir()), [])
 
     def test_listen_in_a_headless_run_returns_at_once(self):
         self.claude("-p", "reply ok")

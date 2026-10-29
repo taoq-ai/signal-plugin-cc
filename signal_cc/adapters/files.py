@@ -1,6 +1,7 @@
 """State shared by every session on the Mac, kept in files under the config home."""
 import fcntl
 import json
+import os
 import secrets
 import sys
 import time
@@ -121,11 +122,52 @@ class Listeners:
             self._path(session).unlink(missing_ok=True)
 
 
+class FileGathering:
+    """Gathering: one JSON file per entry under gather/, and the lead as a lock on gather.lock, which a listener
+    that dies lets go of."""
+
+    def __init__(self, home):
+        self.dir = home / "gather"
+        self.lock = DeskLock(home, "gather.lock")
+
+    def _write(self, tag, row):
+        tmp = self.dir / f".{tag}.{secrets.token_hex(4)}"
+        tmp.write_text(json.dumps(row))
+        os.replace(tmp, self.dir / tag)  # whole, so a reader never sees half of it
+
+    def enter(self, tag, project, first):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None})
+
+    def entries(self):
+        out = {}
+        for p in self.dir.glob("[!.]*") if self.dir.exists() else ():
+            try:
+                out[p.name] = json.loads(p.read_text())
+            except (OSError, ValueError):
+                continue
+        return out
+
+    def update(self, tag, **fields):
+        row = self.entries().get(tag)
+        if row is not None:
+            self._write(tag, {**row, **fields})
+
+    def leave(self, tag):
+        (self.dir / tag).unlink(missing_ok=True)
+
+    def lead(self):
+        return self.lock.acquire()
+
+    def unlead(self):
+        self.lock.release()
+
+
 class DeskLock:
     """Held by the one desk that runs on the Mac."""
 
-    def __init__(self, home):
-        self.path = home / "desk.lock"
+    def __init__(self, home, name="desk.lock"):
+        self.path = home / name
         self.file = None
 
     def acquire(self):

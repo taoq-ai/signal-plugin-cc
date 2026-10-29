@@ -23,7 +23,8 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
 - **Conversation:** when a session finishes a turn while you're away, its last message comes to Signal. Reply
   (quote it if several sessions wrote) and the session wakes with your reply as its next instruction, then
   answers you the same way. Typing at the Mac or closing the session stops it listening, and Signal gets a short
-  notice that replies to that message no longer reach the session.
+  notice that replies to that message no longer reach the session. When several sessions finished while you
+  were at the Mac, leaving sends one digest instead (see [Several prompts at once](#several-prompts-at-once)).
 
 It only relays while you're away: if your Mac has had keyboard or mouse input in the last 60 seconds, Claude Code
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
@@ -101,6 +102,31 @@ when it quotes one of the prompt's messages (swipe to reply), reacts to it, star
 reply while that prompt is the only one waiting and the latest message. Any other plain reply gets one hint that
 lists the waiting prompts.
 
+When two or more sessions finished while you were at the Mac, leaving sends one digest, not one message each,
+about 10 seconds after you count as away:
+
+```
+3 sessions finished:
+[a3f1] ziran-paper: Tests pass. I pushed the branch fix-hashes.
+[7c20] wuwei: Here is the audit of the eight gates, one paragraph each:…
+[e9b4] signal-plugin-cc: (sent at 14:02, above)
+
+Start a reply with a tag to continue that session, or pick one in the poll to read it in full.
+```
+
+Each line holds the session's tag, its project and the first line of its last message (up to 80 characters).
+A session whose message is already on Signal points at it instead. A poll "Which session?" follows, with the
+sessions the digest holds (up to 10; signal-cli takes no more):
+
+- `[a3f1] run the tests too` wakes only a3f1, with "run the tests too".
+- Picking a session in the poll sends its full message and wakes nothing; quote that message to continue it.
+- A reply that quotes or reacts to the digest or its poll, or a plain reply, gets the hint and wakes nothing.
+- A tag of a session you have since typed in at the Mac, or closed, gets "That session no longer listens here;
+  answer at the Mac." and wakes nothing.
+
+Permission prompts, questions and plans still come one by one. A session that finishes after the digest went
+out sends its own message.
+
 ## Security
 
 Anyone who can send messages as `owner` can approve tool calls and plans in your sessions. Keep registration
@@ -125,7 +151,8 @@ There is no setting to keep plans on the Mac only.
 
 Each prompt sent to Signal adds one JSON line to `relay.log` in the config home (`$SIGNAL_CC_HOME` when set,
 otherwise `~/.config/signal-plugin-cc`) when it ends. A prompt line has the keys `time`, `kind` (`permission`,
-`question`, `plan`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
+`question`, `plan`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds); a finished session's message
+that went out in a digest also has `digest` (how many sessions it held). The outcome is one of:
 
 - `answered`, `timed out`, `back at the Mac` or `stream ended`;
 - `answered at the Mac` or `session closed`: a finished session's message was waiting on Signal when you typed
