@@ -7,10 +7,9 @@ import time
 from ..adapters import processes
 from ..app import desk
 from ..app.conversation import continue_session
-from ..domain.forms import ContinueForm, PermissionForm, QuestionForm
+from ..domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm
 from . import wiring
 
-NOT_RELAYED = ("AskUserQuestion", "ExitPlanMode")  # question() answers the one; plan approval stays on the Mac
 WOKEN = "The owner replied from Signal, away from the Mac (signal-plugin-cc):"  # listen()'s wake, seen by quiet()
 
 
@@ -23,10 +22,12 @@ def session_id(hook):
 
 
 def permission(cfg, hook):
-    """PermissionRequest: allow or deny a tool call."""
-    if hook["tool_name"] in NOT_RELAYED:
+    """PermissionRequest: allow or deny a tool call, or approve a plan (ExitPlanMode)."""
+    tool, tool_input = hook["tool_name"], hook.get("tool_input", {})
+    if tool == "AskUserQuestion":  # question() answers it
         return None
-    form = PermissionForm(hook["tool_name"], hook.get("tool_input", {}), project(hook))
+    form = PlanForm(tool_input, project(hook)) if tool == "ExitPlanMode" \
+        else PermissionForm(tool, tool_input, project(hook))
     decision = wiring.conversation(cfg, session_id(hook)).ask(form)
     return decision and {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
 
