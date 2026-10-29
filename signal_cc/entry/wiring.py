@@ -1,5 +1,5 @@
 """The composition root: the one place that picks and builds adapters for the ports."""
-from ..adapters.files import DeskLock, FileRegistry, Listeners
+from ..adapters.files import DeskLock, FileJournal, FileRegistry, Listeners
 from ..adapters.macos import MacPresence
 from ..adapters.signal_cli import SignalCli
 from ..app.conversation import Conversation
@@ -21,5 +21,9 @@ def desk_lock(cfg):
     return DeskLock(cfg.home)
 
 
-def conversation(cfg):
-    return Conversation(daemon(cfg), registry(cfg), MacPresence(cfg.idle), cfg.wait)
+def journal(cfg):
+    return FileJournal(cfg.home)
+
+
+def conversation(cfg, session):
+    return Conversation(daemon(cfg), registry(cfg), MacPresence(cfg.idle), cfg.wait, journal(cfg), session)

@@ -2,7 +2,7 @@
 import threading
 import unittest
 
-from support import FakeMessenger, FakePresence, FakeRegistry, Reply, Waiting, plain, quoting
+from support import FakeJournal, FakeMessenger, FakePresence, FakeRegistry, Reply, Waiting, plain, quoting
 from signal_cc.app import conversation, desk
 from signal_cc.app.conversation import Conversation, continue_session
 from signal_cc.domain import texts
@@ -12,8 +12,9 @@ BASH = PermissionForm("Bash", {"command": "ls"}, "proj")
 OTHER = "0fff"
 
 
-def conv(messenger, registry=None, presence=None, wait=10):
-    return Conversation(messenger, registry or FakeRegistry(), presence or FakePresence(), wait)
+def conv(messenger, registry=None, presence=None, wait=10, journal=None):
+    return Conversation(messenger, registry or FakeRegistry(), presence or FakePresence(), wait,
+                        journal if journal is not None else FakeJournal(), "s1")
 
 
 class AskTest(unittest.TestCase):
@@ -92,6 +93,62 @@ class AskTest(unittest.TestCase):
         m.replies.put(None)
         self.assertIsNone(conv(m, registry).ask(BASH))
         self.assertEqual(registry.waiting(), [])
+
+
+class JournalTest(unittest.TestCase):
+    def setUp(self):
+        conversation.SETTLE, conversation.POLL = 0.3, 0.05
+
+    def ask(self, messenger, presence=None, form=BASH, wait=10):
+        journal = FakeJournal()
+        conv(messenger, presence=presence, wait=wait, journal=journal).ask(form)
+        return journal.lines
+
+    def outcome(self, lines):
+        self.assertEqual(len(lines), 1)
+        return lines[0]["outcome"]
+
+    def test_an_answered_permission_prompt_is_one_line(self):
+        [line] = self.ask(FakeMessenger(quoting("\N{THUMBS UP SIGN}")))
+        self.assertEqual({k: line[k] for k in ("kind", "tag", "session", "outcome")},
+                         {"kind": "permission", "tag": "0001", "session": "s1", "outcome": "answered"})
+        self.assertIsInstance(line["waited"], float)
+        self.assertEqual(sorted(line), ["kind", "outcome", "session", "tag", "waited"])
+
+    def test_each_way_a_prompt_ends_is_named(self):
+        ended = FakeMessenger(lambda t, ts: None)
+        ended.replies.put(None)
+        failing = FakeMessenger()
+        failing.fail_sends = True
+        for messenger, presence, wait, outcome in [
+                (FakeMessenger(), None, 0.5, "timed out"),
+                (ended, None, 10, "stream ended"),
+                (FakeMessenger(), FakePresence(returned=True), 10, "back at the Mac")]:
+            with self.subTest(outcome=outcome):
+                self.assertEqual(self.outcome(self.ask(messenger, presence, wait=wait)), outcome)
+        with self.subTest(outcome="send failed"), self.assertRaises(OSError):
+            conv(failing, journal=(journal := FakeJournal())).ask(BASH)
+        self.assertEqual(self.outcome(journal.lines), "send failed")
+
+    def test_an_error_while_waiting_is_recorded_and_raised(self):
+        registry, journal = FakeRegistry(), FakeJournal()
+        registry.waiting = lambda: 1 / 0
+        m = FakeMessenger(plain("y"))
+        with self.assertRaises(ZeroDivisionError):
+            conv(m, registry, journal=journal).ask(BASH)
+        self.assertEqual(self.outcome(journal.lines), "error")
+
+    def test_questions_and_continues_name_their_kind(self):
+        qs = [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]}]
+        [line] = self.ask(FakeMessenger(plain("2")), form=QuestionForm(qs, "proj"))
+        self.assertEqual((line["kind"], line["outcome"]), ("question", "answered"))
+        journal = FakeJournal()
+        continue_session(conv(FakeMessenger(quoting("go on")), journal=journal), ContinueForm("Done.", "proj"),
+                         grace=5, wait=10)
+        self.assertEqual((journal.lines[0]["kind"], journal.lines[0]["outcome"]), ("continue", "answered"))
+
+    def test_nothing_is_recorded_while_the_owner_is_at_the_mac(self):
+        self.assertEqual(self.ask(FakeMessenger(), FakePresence(away=False)), [])
 
 
 class ContinueTest(unittest.TestCase):

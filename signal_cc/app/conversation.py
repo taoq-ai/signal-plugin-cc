@@ -11,11 +11,13 @@ POLL = 5  # seconds between presence checks while a finished session waits for t
 
 
 class Conversation:
-    def __init__(self, messenger, registry, presence, wait):
+    def __init__(self, messenger, registry, presence, wait, journal, session):
         self.messenger = messenger
         self.registry = registry
         self.presence = presence
         self.wait = wait  # seconds a prompt waits for a reply
+        self.journal = journal
+        self.session = session  # the Claude Code session that asks, for the journal
 
     def say(self, tag, text):
         """Send text that belongs to the prompt tagged tag (None: record nothing)."""
@@ -31,12 +33,21 @@ class Conversation:
         """
         if not self.presence.away():
             return None
-        wait = wait or self.wait
+        end, started = {"tag": None, "outcome": "send failed"}, time.time()
+        try:
+            return self._ask(form, wait or self.wait, leave_on_return, end)
+        finally:  # one line per prompt, however it ends; never the text or who it went to
+            self.journal.record({"kind": form.kind, "tag": end["tag"], "session": self.session,
+                                 "outcome": end["outcome"], "waited": round(time.time() - started, 1)})
+
+    def _ask(self, form, wait, leave_on_return, end):
+        """ask, noting in end the prompt's tag and how it ended."""
         replies, close = self.messenger.subscribe()  # before sending, so no reply is missed
-        tag = self.registry.claim(form.text.splitlines()[0], wait)
+        tag = end["tag"] = self.registry.claim(form.text.splitlines()[0], wait)
         sent = {}  # timestamp of each message of this prompt -> the poll index it holds, or None
         try:
             sent[self.say(tag, texts.tagged(tag, form.text))] = None
+            end["outcome"] = "error"  # until _collect names the end
             for i, poll in enumerate(form.polls):
                 try:
                     self.registry.mark_latest(tag)
@@ -44,7 +55,7 @@ class Conversation:
                                                   poll.multi)] = i
                 except RuntimeError:
                     break  # the text message still takes replies
-            return self._collect(form, tag, sent, replies, time.time() + wait, leave_on_return)
+            return self._collect(form, tag, sent, replies, time.time() + wait, leave_on_return, end)
         finally:
             self.registry.release(tag)
             for ts, poll in sent.items():
@@ -55,7 +66,7 @@ class Conversation:
                         pass
             close()
 
-    def _collect(self, form, tag, sent, replies, deadline, leave_on_return):
+    def _collect(self, form, tag, sent, replies, deadline, leave_on_return, end):
         value, settle = None, 0
         while time.time() < deadline:
             if value is not None and time.time() >= settle:
@@ -64,10 +75,12 @@ class Conversation:
                 reply = replies.get(timeout=2 if value is None else max(0.1, settle - time.time()))
             except queue.Empty:
                 if value is None and leave_on_return and self.presence.returned():
+                    end["outcome"] = "back at the Mac"
                     self.say(tag, texts.tagged(tag, texts.BACK_AT_MAC))
                     return None
                 continue
             if reply is None:
+                end["outcome"] = "stream ended" if value is None else "answered"
                 return value  # the stream ended
             where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest())
             if where == HINT:
@@ -82,6 +95,7 @@ class Conversation:
                 value = result
                 if where.reply.votes is not None and form.polls[where.target].multi:
                     settle = max(settle, time.time() + SETTLE)
+        end["outcome"] = "timed out" if value is None else "answered"
         if value is None:
             self.say(tag, texts.tagged(tag, texts.TIMED_OUT))
         else:

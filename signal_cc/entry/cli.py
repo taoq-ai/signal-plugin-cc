@@ -4,10 +4,16 @@ import sys
 import traceback
 
 from ..config import Config
-from . import hooks
+from . import hooks, wiring
 
 HANDLERS = {"start": hooks.start, "permission": hooks.permission, "question": hooks.question,
             "listen": hooks.listen, "quiet": hooks.quiet, "desk": hooks.run_desk}
+
+
+def failed(cfg, argv, error):
+    """Record a handler's failure by its type only: the message may quote the prompt."""
+    handler = argv[1] if len(argv) > 1 and argv[1] in HANDLERS else "unknown"
+    wiring.journal(cfg).record({"handler": handler, "outcome": "error", "error": type(error).__name__})
 
 
 def main(argv=sys.argv):
@@ -19,9 +25,11 @@ def main(argv=sys.argv):
         out = HANDLERS[argv[1]](cfg, json.loads(data) if data.strip() else {})
     except OSError as e:
         print(f"signal-plugin-cc: signal-cli daemon on port {cfg.port}: {e}", file=sys.stderr)
+        failed(cfg, argv, e)
         return
-    except Exception:
+    except Exception as e:
         traceback.print_exc()  # a relay failure must never block the session
+        failed(cfg, argv, e)
         return
     if out:
         print(json.dumps(out))

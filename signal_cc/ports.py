@@ -39,6 +39,13 @@ class Registry(Protocol):
         """Record the tag of the message about to be sent."""
 
 
+class Journal(Protocol):
+    """A local record of how each relayed prompt ended. Entries never hold message text or numbers."""
+
+    def record(self, entry: dict) -> None:
+        """Add one entry, stamped with the time. Never raises: the log must not break the relay."""
+
+
 class Presence(Protocol):
     """Whether the owner is at the Mac."""
 

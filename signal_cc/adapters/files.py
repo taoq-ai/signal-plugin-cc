@@ -2,6 +2,7 @@
 import fcntl
 import json
 import secrets
+import sys
 import time
 
 from ..domain.model import Waiting
@@ -59,6 +60,22 @@ class FileRegistry:
     def mark_latest(self, tag):
         self.home.mkdir(parents=True, exist_ok=True)
         (self.home / "last").write_text(tag)
+
+
+class FileJournal:
+    """Journal: one JSON line per entry in relay.log, appended by every session on the Mac."""
+
+    def __init__(self, home):
+        self.path = home / "relay.log"
+
+    def record(self, entry):
+        line = json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **entry}) + "\n"
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a") as f:
+                f.write(line)  # one short write per line, so sessions appending at once don't interleave
+        except OSError as e:
+            print(f"signal-plugin-cc: {self.path}: {e}", file=sys.stderr)
 
 
 class Listeners:
