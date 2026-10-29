@@ -10,13 +10,21 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.14"]  # 3.9: the python3 macOS ships
+        include:
+          - {os: ubuntu-latest, python: "3.10"}
+          - {os: ubuntu-latest, python: "3.14"}
+          - {os: macos-latest, python: system}  # /usr/bin/python3, the one hooks.json runs on a Mac (3.9)
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - if: matrix.python != 'system'
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m unittest discover -s tests -v
+      - if: matrix.python != 'system'
+        run: python -m unittest discover -s tests -v
+      - if: matrix.python == 'system'
+        run: /usr/bin/python3 --version && /usr/bin/python3 -m unittest discover -s tests -v
