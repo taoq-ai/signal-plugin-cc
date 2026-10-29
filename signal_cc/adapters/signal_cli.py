@@ -7,6 +7,7 @@ import threading
 import urllib.request
 
 from ..domain.model import Reply
+from . import private
 
 
 class SignalCli:
@@ -23,8 +24,8 @@ class SignalCli:
 
     def start(self):
         """Start the daemon in the background, logging to <home>/daemon.log."""
-        self.cfg.home.mkdir(parents=True, exist_ok=True)
-        with open(self.cfg.home / "daemon.log", "ab") as log:
+        private.home(self.cfg.home)
+        with private.open_file(self.cfg.home / "daemon.log", "ab") as log:
             subprocess.Popen(
                 [self.cfg.signal_cli, "-a", self.cfg.account, "daemon", "--http", f"127.0.0.1:{self.cfg.port}"],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)

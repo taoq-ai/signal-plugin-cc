@@ -7,6 +7,7 @@ import sys
 import time
 
 from ..domain.model import Waiting
+from . import private
 
 
 class FileRegistry:
@@ -18,7 +19,8 @@ class FileRegistry:
 
     def claim(self, summary, ttl):
         """The claim exists before the prompt is sent, so no other session takes a plain reply to it."""
-        self.pending.mkdir(parents=True, exist_ok=True)
+        private.home(self.home)
+        private.folder(self.pending)
         now = time.time()
         for p in self.pending.iterdir():  # drop the claims of prompts that ended without cleaning up
             try:
@@ -29,7 +31,7 @@ class FileRegistry:
         while True:
             tag = secrets.token_hex(2)
             try:
-                with open(self.pending / tag, "x") as f:
+                with private.open_file(self.pending / tag, "x") as f:
                     json.dump({"created": now, "deadline": now + ttl, "summary": summary}, f)
                 return tag
             except FileExistsError:
@@ -59,8 +61,9 @@ class FileRegistry:
             return ""
 
     def mark_latest(self, tag):
-        self.home.mkdir(parents=True, exist_ok=True)
-        (self.home / "last").write_text(tag)
+        private.home(self.home)
+        with private.open_file(self.home / "last", "w") as f:
+            f.write(tag)
 
 
 class AwaySwitch:
@@ -75,8 +78,8 @@ class AwaySwitch:
 
     def set(self, on):
         if on:
-            self.home.mkdir(parents=True, exist_ok=True)
-            self.path.touch()
+            private.home(self.home)
+            private.open_file(self.path, "a").close()
         else:
             self.path.unlink(missing_ok=True)
 
@@ -90,8 +93,8 @@ class FileJournal:
     def record(self, entry):
         line = json.dumps({"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **entry}) + "\n"
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "a") as f:
+            private.home(self.path.parent)
+            with private.open_file(self.path, "a") as f:
                 f.write(line)  # one short write per line, so sessions appending at once don't interleave
         except OSError as e:
             print(f"signal-plugin-cc: {self.path}: {e}", file=sys.stderr)
@@ -113,8 +116,10 @@ class Listeners:
             return None
 
     def set(self, session, pid):
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self._path(session).write_text(str(pid))
+        private.home(self.dir.parent)
+        private.folder(self.dir)
+        with private.open_file(self._path(session), "w") as f:
+            f.write(str(pid))
 
     def clear(self, session, pid=None):
         """Forget the session's listener; with pid, only if it is still that one."""
@@ -132,11 +137,13 @@ class FileGathering:
 
     def _write(self, tag, row):
         tmp = self.dir / f".{tag}.{secrets.token_hex(4)}"
-        tmp.write_text(json.dumps(row))
-        os.replace(tmp, self.dir / tag)  # whole, so a reader never sees half of it
+        with private.open_file(tmp, "x") as f:
+            json.dump(row, f)
+        os.replace(tmp, self.dir / tag)  # whole, so a reader never sees half of it; replaces a symlink, never follows
 
     def enter(self, tag, project, first):
-        self.dir.mkdir(parents=True, exist_ok=True)
+        private.home(self.dir.parent)
+        private.folder(self.dir)
         self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None})
 
     def entries(self):
@@ -171,8 +178,8 @@ class DeskLock:
         self.file = None
 
     def acquire(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = open(self.path, "w")
+        private.home(self.path.parent)
+        self.file = private.open_file(self.path, "w")
         try:
             fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
