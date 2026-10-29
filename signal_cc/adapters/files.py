@@ -141,21 +141,22 @@ class FileGathering:
             json.dump(row, f)
         os.replace(tmp, self.dir / tag)  # whole, so a reader never sees half of it; replaces a symlink, never follows
 
-    def enter(self, tag, project, first):
+    def enter(self, tag, project, first, sent=None):
         private.home(self.dir.parent)
         private.folder(self.dir)
-        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None,
+        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": sent, "digest": None,
                           "pid": os.getpid()})
 
     def entries(self):
-        """The entries of listeners still alive; one whose listener was killed before it could leave is removed."""
+        """The entries of listeners still alive, and the gone ones, kept for their digest until the next lead
+        clears them; one whose listener was killed before it could leave is removed."""
         out = {}
         for p in self.dir.glob("[!.]*") if self.dir.exists() else ():
             try:
                 row = json.loads(p.read_text())
             except (OSError, ValueError):
                 continue
-            if alive(row.get("pid")):
+            if row.get("gone") or alive(row.get("pid")):
                 out[p.name] = row
             else:
                 private.remove(p)

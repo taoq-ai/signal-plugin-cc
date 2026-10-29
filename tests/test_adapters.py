@@ -15,7 +15,8 @@ from dataclasses import replace
 from unittest import mock
 from pathlib import Path
 
-from support import OWNER, ROOT, Reply, StubDaemon, serve
+from support import (OWNER, ROOT, Chat, FakeJournal, FakeRegistry, Leaving, Reply, StubDaemon, Waiting,
+                     serve)
 from signal_cc.adapters import files, macos, private, processes, signal_cli
 from signal_cc.adapters.files import AwaySwitch, DeskLock, FileGathering, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
@@ -145,6 +146,7 @@ class FilesTest(Base):
     def test_gathering_shares_entries_between_listeners_and_one_lead(self):
         first, second = FileGathering(self.home), FileGathering(self.home)
         first.enter("aaaa", "proj", "Done.")
+        self.assertEqual(json.loads((self.home / "gather" / "aaaa").read_text())["pid"], os.getpid())
         second.update("aaaa", sent=5.0)
         second.update("bbbb", sent=1.0)  # left already: not brought back
         (self.home / "gather" / "cccc").write_text("{not json")  # half written: skipped
@@ -165,6 +167,36 @@ class FilesTest(Base):
         first.leave("aaaa")
         first.leave("aaaa")
         self.assertEqual(second.entries(), {})
+
+    def test_a_member_taken_over_stays_gone_after_its_listener_exits_until_the_next_lead(self):
+        child = ("import sys; sys.path.insert(0, sys.argv[1])\n"
+                 "from pathlib import Path\n"
+                 "from signal_cc.adapters.files import FileGathering\n"
+                 "g = FileGathering(Path(sys.argv[2]))\n"
+                 "g.enter('abcd', 'proj', 'Done.')\n"
+                 "g.update('abcd', sent=1.0, gone='answered at the Mac')\n")
+        subprocess.run([sys.executable, "-c", child, str(ROOT), str(self.home)], check=True)  # wrote gone, exited
+        gathering = FileGathering(self.home)
+        self.assertEqual(gathering.entries()["abcd"]["gone"], "answered at the Mac")
+        self.assertEqual(gathering.entries()["abcd"]["gone"], "answered at the Mac")  # still there when read again
+        # the next lead clears it, even when a new prompt has claimed the same tag meanwhile
+        chat, registry = Chat(), FakeRegistry(Waiting(0, "abcd", "Bash in other:"))
+        leaving, done = Leaving(2), []
+        for project in ("p1", "p2"):
+            c = conversation.Conversation(chat, registry, leaving, 10, FakeJournal(), project, gathering)
+            t = threading.Thread(target=lambda c=c, p=project: done.append(
+                conversation.continue_session(c, ContinueForm("Done.", p), 5, 10)))
+            t.start()
+            self.addCleanup(t.join, 5)
+        for _ in range(250):
+            if chat.sent:
+                break
+            time.sleep(0.02)
+        time.sleep(0.2)
+        chat.post(None)
+        self.assertTrue(chat.sent[0].startswith("2 sessions finished:\n"), chat.sent)
+        self.assertNotIn("abcd", chat.sent[0])
+        self.assertNotIn("abcd", gathering.entries())
 
     def test_stop_ends_a_relay_process_and_nothing_else(self):
         fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "relay.py"])

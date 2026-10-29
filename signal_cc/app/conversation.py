@@ -55,15 +55,19 @@ class Conversation:
         replies, close = self.messenger.subscribe()  # before sending, so no reply is missed
         tag = end["tag"] = self.registry.claim(form.text.splitlines()[0], wait)
         sent = {}  # timestamp of each message of this prompt -> the poll index it holds, None, or a Digest
+        own = None  # the timestamp of this prompt's own message; None while it went out in a digest
         try:
             end["outcome"] = "send failed"
-            if gathering:
-                gathering.enter(tag, form.project, form.first)
-                sent.update(self._gather(tag, gathering, end) if join else {})
-            if not sent:
-                sent[self.say(tag, texts.tagged(tag, form.text))] = None
-                if gathering:
+            digest = self._gather(form, tag, gathering) if gathering and join else None
+            if digest:
+                sent.update(self._joined(digest, end))
+            else:
+                own = self.say(tag, texts.tagged(tag, form.text))
+                sent[own] = None
+                if gathering and join:
                     gathering.update(tag, sent=time.time())  # a later digest points at this message
+                elif gathering:  # entered once sent, so no lead takes it for a member
+                    gathering.enter(tag, form.project, form.first, sent=time.time())
             end["outcome"] = "error"  # until _collect names the end
             for i, poll in enumerate(form.polls):
                 try:
@@ -100,18 +104,19 @@ class Conversation:
                         pass
             close()
 
-    def _gather(self, tag, gathering, end):
-        """Join one digest with the other sessions that finished at the same time; return the digest's messages
-        as sent entries, or {} for this session to send its own message (the only one finished)."""
+    def _gather(self, form, tag, gathering):
+        """Join one digest with the other sessions that finished while the owner was at the Mac; return the
+        digest this session went out in, or None for it to send its own message (the only one finished)."""
+        gathering.enter(tag, form.project, form.first)
         while not gathering.lead():  # another session gathers: it may put this one in its digest
             digest = (gathering.entries().get(tag) or {}).get("digest")
             if digest:
-                return self._joined(digest, end)
+                return digest
             time.sleep(STEP)
         try:
             digest = (gathering.entries().get(tag) or {}).get("digest")  # the last lead may have just put it in
             if digest:
-                return self._joined(digest, end)
+                return digest
             time.sleep(GATHER)
             live = {w.tag for w in self.registry.waiting()}
             rows = gathering.entries()
@@ -121,7 +126,7 @@ class Conversation:
             rows = sorted((r["created"], t, r) for t, r in rows.items())
             members = [t for _, t, r in rows if r["sent"] is None]
             if len(members) < 2:
-                return {}
+                return None
             text = texts.digest([(t, r["project"], r["first"], r["sent"]) for _, t, r in rows])
             digest = {"tags": members, "text": self.say("", text), "poll": None,
                       "options": members[:texts.DIGEST_POLL_MAX]}
@@ -135,7 +140,7 @@ class Conversation:
             now = time.time()
             for t in members:
                 gathering.update(t, digest=digest, sent=now)
-            return self._joined(digest, end)
+            return digest
         finally:
             gathering.unlead()
 
@@ -166,7 +171,7 @@ class Conversation:
                 end["outcome"] = "stream ended" if value is None else "answered"
                 return value  # the stream ended
             gone = {t for t, r in self.gathering.entries().items() if r.get("gone")} if self.gathering else ()
-            where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest(), gone)
+            where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest(), gone=gone)
             if isinstance(where, Gone):
                 self.say("", texts.tagged(where.tag, texts.GONE))
                 continue

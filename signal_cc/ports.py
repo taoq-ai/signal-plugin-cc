@@ -51,8 +51,8 @@ class Gathering(Protocol):
 
     An adapter may add its own keys."""
 
-    def enter(self, tag: str, project: str, first: str) -> None:
-        """Add the finished session's prompt, tagged tag."""
+    def enter(self, tag: str, project: str, first: str, sent: float = None) -> None:
+        """Add the finished session's prompt, tagged tag; sent when its own message went out already."""
 
     def entries(self) -> dict:
         """Every entry, by tag."""

@@ -80,8 +80,8 @@ class FakeGathering:
     def __init__(self):
         self.rows, self.lock = {}, threading.Lock()
 
-    def enter(self, tag, project, first):
-        self.rows[tag] = {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None}
+    def enter(self, tag, project, first, sent=None):
+        self.rows[tag] = {"created": time.time(), "project": project, "first": first, "sent": sent, "digest": None}
 
     def entries(self):
         return {tag: dict(row) for tag, row in list(self.rows.items())}

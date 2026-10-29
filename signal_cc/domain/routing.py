@@ -31,7 +31,7 @@ def command(reply):
     return word if reply.quoted is None and reply.votes is None and word in COMMANDS else None
 
 
-def route(reply, me, sent, live, latest, gone=()):
+def route(reply, me, sent, live, latest, *, gone=()):
     """Where a reply goes, seen from the prompt tagged me.
 
     sent maps the timestamp of each of my messages to the poll it holds (None for text); live is the

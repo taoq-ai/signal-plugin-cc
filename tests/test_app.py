@@ -286,9 +286,11 @@ class Ear:
     """One listener's side of a shared chat, which hooks.quiet can stop like it stops a listener process."""
 
     def __init__(self, chat):
-        self.chat, self.stop = chat, None
+        self.chat, self.stop, self.hold = chat, None, None
 
     def send(self, text):
+        if self.hold:
+            self.hold()  # a slow send: signal-cli can take seconds
         return self.chat.send(text)
 
     def send_poll(self, question, options, multi):
@@ -318,9 +320,11 @@ class DigestTest(unittest.TestCase):
         self.journal, self.results, self.threads, self.ears = FakeJournal(), {}, [], {}
         self.addCleanup(self.end)
 
-    def finish(self, project, last="Done.", presence=None):
-        """A session's turn ends and its listener starts; the owner is away already unless presence says else."""
+    def finish(self, project, last="Done.", presence=None, hold=None):
+        """A session's turn ends and its listener starts; the owner is away already unless presence says else.
+        hold runs before each of its sends."""
         ear = self.ears[project] = Ear(self.chat)
+        ear.hold = hold
         c = Conversation(ear, self.registry, presence or FakePresence(), 10, self.journal, project, self.gathering)
 
         def run():
@@ -491,6 +495,15 @@ class DigestTest(unittest.TestCase):
         self.sent_count(4)
         self.assertEqual(sorted(self.chat.sent[2:]), [f"[{self.tag(p)}] {p}:\nDone.\n\nReply to continue this session."
                                                        for p in sorted("de", key=self.tag)])
+
+    def test_a_session_that_found_the_owner_away_never_goes_out_in_a_digest_while_its_send_is_slow(self):
+        self.finish_at_mac(["a", "b"])
+        # found the owner away: its own message, sent slowly, goes out only after the lead's gather window
+        self.finish("d", hold=lambda: self.until(lambda: len(self.chat.sent) >= 2, "the digest"))
+        self.sent_count(3)
+        self.assertTrue(self.chat.sent[0].startswith("2 sessions finished:"), self.chat.sent[0])
+        self.assertNotIn(self.tag("d"), self.chat.sent[0] + self.chat.sent[1])
+        self.assertEqual(self.chat.sent[2], f"[{self.tag('d')}] d:\nDone.\n\nReply to continue this session.")
 
     def test_a_poll_pick_of_a_session_taken_over_says_it_no_longer_listens(self):
         a, b, c = self.three()
