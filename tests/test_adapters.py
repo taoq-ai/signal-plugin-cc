@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 from dataclasses import replace
+from unittest import mock
 from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
@@ -36,6 +37,18 @@ class Base(unittest.TestCase):
         macos.idle_seconds = lambda: 1000  # away from the Mac
         conversation.SETTLE, conversation.POLL = 0.3, 0.05
         self.cfg = Config(owner=OWNER, bot="+15550000002", home=self.home, port=self.server.server_port, wait=10)
+        env = mock.patch.dict(os.environ)  # the run the tests run in must not decide whether a session is headless
+        env.start()
+        self.addCleanup(env.stop)
+        for key in ("CLAUDE_PID", "CLAUDE_CODE_ENTRYPOINT"):
+            os.environ.pop(key, None)
+
+    def claude(self, *args):
+        """A stand-in for the Claude Code process, with its arguments, named by CLAUDE_PID as in a hook."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", *args])
+        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        os.environ["CLAUDE_PID"] = str(proc.pid)
+        return proc
 
     def tearDown(self):
         StubDaemon.events.put(None)  # end any open event stream
@@ -128,6 +141,32 @@ class FilesTest(Base):
                 p.wait()
 
 
+class HeadlessTest(Base):
+    def test_print_mode_is_headless_even_with_an_inherited_entrypoint(self):
+        self.claude("-p", "reply ok")
+        os.environ["CLAUDE_CODE_ENTRYPOINT"] = "claude-desktop"  # inherited from the desktop session
+        self.assertTrue(processes.headless())
+
+    def test_interactive_and_streaming_sessions_are_not(self):
+        for args, entrypoint in [((), "cli"), (("--output-format", "stream-json", "--input-format", "stream-json"),
+                                               "claude-desktop"),
+                                 (("--print", "--input-format", "stream-json"), "sdk-cli"),
+                                 (("--print", "--input-format=stream-json"), "sdk-cli")]:
+            with self.subTest(args=args):
+                self.claude(*args)
+                os.environ["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
+                self.assertFalse(processes.headless())
+
+    def test_without_the_claude_process_the_entrypoint_decides(self):
+        os.environ["CLAUDE_PID"] = "999999999"  # gone
+        for entrypoint, expected in [("sdk-cli", True), ("cli", False), (None, False)]:
+            with self.subTest(entrypoint=entrypoint):
+                os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+                if entrypoint:
+                    os.environ["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
+                self.assertEqual(processes.headless(), expected)
+
+
 class HooksTest(Base):
     def test_permission_end_to_end(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "Y", "quote": {"id": ts}}})
@@ -144,6 +183,16 @@ class HooksTest(Base):
         self.assertEqual(woke.exception.code, 2)
         self.assertIn("run the tests too", err.getvalue())
         self.assertIsNone(Listeners(self.home).get("s1"))
+
+    def test_listen_in_a_headless_run_returns_at_once(self):
+        self.claude("-p", "reply ok")
+        os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"
+        self.cfg = replace(self.cfg, wait=1, listen=1)  # without the guard, stop waiting soon
+        began = time.monotonic()
+        out = hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done.",
+                                      "stop_hook_active": False})
+        self.assertLess(time.monotonic() - began, 1)
+        self.assertEqual((out, StubDaemon.calls, Listeners(self.home).get("s1")), (None, [], None))
 
     def test_the_desk_answers_status(self):
         registry = FileRegistry(self.home)
@@ -180,6 +229,20 @@ class ConfigTest(unittest.TestCase):
                                  env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
                                  input='{"tool_name": "Bash", "tool_input": {}}', capture_output=True, text=True)
         self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
+
+    def test_without_fcntl_every_hook_exits_silently(self):
+        # Windows has no fcntl; the relay must not fail at import there, even when set up
+        run_without_fcntl = ("import runpy, sys; sys.modules['fcntl'] = None; sys.argv[0] = %r; "
+                             "runpy.run_path(sys.argv[0], run_name='__main__')" % str(ROOT / "relay.py"))
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "config.json").write_text('{"owner": "+2", "port": 1}')
+            for handler in ("start", "permission", "question", "listen", "quiet", "desk"):
+                with self.subTest(handler=handler):
+                    run = subprocess.run([sys.executable, "-c", run_without_fcntl, handler],
+                                         env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
+                                         input='{"tool_name": "Bash", "tool_input": {}}', capture_output=True,
+                                         text=True, timeout=10)
+                    self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
 
     def test_the_relay_is_the_entry_processes_spawn(self):
         self.assertEqual(processes.RELAY, ROOT / "relay.py")

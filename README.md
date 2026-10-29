@@ -24,6 +24,12 @@ It only relays while you're away: if your Mac has had keyboard or mouse input in
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
 No reply within 5 minutes also hands it back. Without a config file the plugin does nothing.
 
+## Requirements
+
+macOS, with Python 3.9 or later (the system `python3` will do). Linux works without idle detection (see
+[Limits](#limits)); Windows is not supported, and there the hooks do nothing. In a headless run (`claude -p`)
+a finished turn is not sent, because nobody can continue it; permission prompts and questions still are.
+
 ## Setup
 
 1. Install signal-cli (it brings Java) and qrencode:
