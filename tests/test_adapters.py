@@ -143,9 +143,25 @@ class FilesTest(Base):
 
 class HeadlessTest(Base):
     def test_print_mode_is_headless_even_with_an_inherited_entrypoint(self):
+        for args in [("-p", "reply ok"), ("--print", "x")]:
+            with self.subTest(args=args):
+                self.claude(*args)
+                os.environ["CLAUDE_CODE_ENTRYPOINT"] = "claude-desktop"  # inherited from the desktop session
+                self.assertTrue(processes.headless())
+
+    def test_only_a_single_pid_is_read(self):
+        printing = self.claude("-p", "reply ok")
+        os.environ["CLAUDE_PID"] = f"1,{printing.pid}"  # ps would read both processes
+        os.environ["CLAUDE_CODE_ENTRYPOINT"] = "cli"
+        self.assertFalse(processes.headless())
+
+    def test_without_ps_the_entrypoint_decides(self):
         self.claude("-p", "reply ok")
-        os.environ["CLAUDE_CODE_ENTRYPOINT"] = "claude-desktop"  # inherited from the desktop session
-        self.assertTrue(processes.headless())
+        os.environ["PATH"] = ""
+        for entrypoint, expected in [("sdk-cli", True), ("cli", False)]:
+            with self.subTest(entrypoint=entrypoint):
+                os.environ["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
+                self.assertEqual(processes.headless(), expected)
 
     def test_interactive_and_streaming_sessions_are_not(self):
         for args, entrypoint in [((), "cli"), (("--output-format", "stream-json", "--input-format", "stream-json"),
