@@ -1,5 +1,6 @@
 """What the application needs from the outside world. Adapters implement these; app code depends only
 on them, so the use cases run against in-memory fakes in tests."""
+import queue
 from typing import Callable, List, Protocol, Tuple
 
 
@@ -15,7 +16,7 @@ class Messenger(Protocol):
     def end_poll(self, ts: int) -> None:
         """Close a poll."""
 
-    def subscribe(self) -> Tuple["queue.Queue", Callable[[], None]]:
+    def subscribe(self) -> Tuple[queue.Queue, Callable[[], None]]:
         """Start receiving: a queue of Reply from the owner (None once the stream ends), and close."""
 
 

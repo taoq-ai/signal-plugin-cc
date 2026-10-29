@@ -112,7 +112,7 @@ Ports and adapters. Each layer imports only from the layers above it in this lis
 | `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`. |
 | `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`. |
 | `signal_cc/adapters` | signal-cli over HTTP, state files under the config home, macOS idle time, the relay's processes. |
-| `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks adapters. |
+| `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks and builds adapters. |
 
 Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.
 

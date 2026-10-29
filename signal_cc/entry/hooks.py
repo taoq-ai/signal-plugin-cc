@@ -5,8 +5,6 @@ import sys
 import time
 
 from ..adapters import processes
-from ..adapters.files import DeskLock, FileRegistry, Listeners
-from ..adapters.signal_cli import SignalCli
 from ..app import desk
 from ..app.conversation import continue_session
 from ..domain.forms import ContinueForm, PermissionForm, QuestionForm
@@ -38,7 +36,7 @@ def question(cfg, hook):
 
 def quiet(cfg, hook):
     """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it."""
-    listeners, session = Listeners(cfg.home), hook.get("session_id", "unknown")
+    listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
     pid = listeners.get(session)
     listeners.clear(session)
     processes.stop(pid)
@@ -48,7 +46,7 @@ def listen(cfg, hook):
     """Stop, in the background with asyncRewake: once the owner is away, send Claude's last message and
     wake the session with the reply by exiting 2 with it on stderr."""
     quiet(cfg, hook)  # replace the listener of the session's previous turn
-    listeners, session = Listeners(cfg.home), hook.get("session_id", "unknown")
+    listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
     listeners.set(session, os.getpid())
     processes.exit_on_sigterm()  # quieted: let the conversation clean up
     try:
@@ -64,7 +62,7 @@ def listen(cfg, hook):
 
 def start(cfg, hook):
     """SessionStart: start the signal-cli daemon and the desk unless they are running."""
-    daemon = SignalCli(cfg)
+    daemon = wiring.daemon(cfg)
     if not daemon.is_up():
         daemon.start()
     processes.spawn("desk", cfg.home / "daemon.log")  # a second desk exits at once
@@ -72,15 +70,15 @@ def start(cfg, hook):
 
 def run_desk(cfg, hook=None):
     """The desk process: answer commands while the daemon runs. Only one desk runs on the Mac."""
-    lock = DeskLock(cfg.home)
+    lock = wiring.desk_lock(cfg)
     if not lock.acquire():
         return None
     try:
-        daemon = SignalCli(cfg)
+        daemon = wiring.daemon(cfg)
         for _ in range(60):  # SessionStart may have started the daemon a moment ago
             if daemon.is_up():
                 break
             time.sleep(1)
-        desk.serve(daemon, FileRegistry(cfg.home))
+        desk.serve(daemon, wiring.registry(cfg))
     finally:
         lock.release()

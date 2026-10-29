@@ -119,7 +119,8 @@ class FilesTest(Base):
             hooks.quiet(self.cfg, {"session_id": "s1"})
             hooks.quiet(self.cfg, {"session_id": "s2"})  # not a relay process: left alone
             self.assertIsNotNone(fake.wait(timeout=5))
-            self.assertIsNone(other.poll())
+            with self.assertRaises(subprocess.TimeoutExpired):  # still alive after a SIGTERM would have landed
+                other.wait(timeout=2)
             self.assertIsNone(listeners.get("s1"))
         finally:
             for p in (fake, other):

@@ -3,6 +3,7 @@ import json
 import queue
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class FakeMessenger:
 class FakeRegistry:
     def __init__(self, *others):
         self.live = {w.tag: w for w in others}
+        self.expires = {}  # tag -> when its claim lapses; others never do
         self.last = ""
         self.n = 0
 
@@ -59,13 +61,14 @@ class FakeRegistry:
         self.n += 1
         tag = f"{self.n:04x}"
         self.live[tag] = Waiting(10_000_000_000 + self.n, tag, summary)  # newer than any test fixture
+        self.expires[tag] = time.time() + ttl
         return tag
 
     def release(self, tag):
         self.live.pop(tag, None)
 
     def waiting(self):
-        return sorted(self.live.values())
+        return sorted(w for w in self.live.values() if self.expires.get(w.tag, float("inf")) > time.time())
 
     def latest(self):
         return self.last

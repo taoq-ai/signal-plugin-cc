@@ -105,6 +105,17 @@ class ContinueTest(unittest.TestCase):
         self.assertIn("proj:\nDone.", m.sent[0])
         self.assertIn("\N{CHECK MARK} Sent to proj", m.sent[-1])
 
+    def test_the_claim_lasts_as_long_as_the_session_listens(self):
+        m, registry, seen = FakeMessenger(lambda t, ts: None), FakeRegistry(), []
+
+        def check_then_reply():
+            seen.extend(w.tag for w in registry.waiting())
+            m.replies.put(Reply("go on", 1001))
+        threading.Timer(0.8, check_then_reply).start()  # past the prompt wait of 0.3 s, inside the listen wait
+        c = conv(m, registry, wait=0.3)
+        self.assertEqual(continue_session(c, ContinueForm("Done.", "proj"), grace=5, wait=5), "go on")
+        self.assertEqual(seen, ["0001"])
+
     def test_stays_silent_when_the_owner_stays_at_the_mac(self):
         m = FakeMessenger()
         c = conv(m, presence=FakePresence(away=False))
