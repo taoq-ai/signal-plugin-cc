@@ -6,8 +6,9 @@ sent belongs to it. For any other plain reply, the oldest waiting prompt sends o
 
 A digest lists several finished sessions in one message and a poll. Its members share both: a reply
 quoting or reacting to them names no session, so the oldest waiting member sends the hint; a vote in the
-poll shows the picked session's full message; a tag of a member the Mac took over gets told so, and a tag
-of any other member that no longer waits (just answered by this very reply, say) is left alone.
+poll shows the picked session's full message; a tag or pick of a member the Mac took over gets told so,
+once, and a tag of any other member that no longer waits (just answered by this very reply, say) is left
+alone.
 """
 import re
 from collections import namedtuple
@@ -47,14 +48,18 @@ def route(reply, me, sent, live, latest, gone=()):
     if tagged:  # a tag of a digest member that no longer waits
         for digest in (d for d in sent.values() if isinstance(d, Digest)):
             if tagged.group(1).lower() in digest.tags:
-                taken = tagged.group(1).lower() in gone and oldest(digest, live) == me
-                return Gone(tagged.group(1).lower()) if taken else SKIP
+                return gone_or_skip(tagged.group(1).lower(), digest, me, live, gone)
+        if tagged.group(1).lower() in gone:  # a digest this prompt is not in answers it
+            return SKIP
     if reply.quoted is not None:
         where = sent.get(reply.quoted, SKIP)
         if not isinstance(where, Digest):
             return SKIP if where is SKIP else Take(reply, where)
         if where.poll is not None and reply.votes is not None:
-            return SHOW if {where.poll[i] for i in reply.votes if i < len(where.poll)} == {me} else SKIP
+            picked = {where.poll[i] for i in reply.votes if 0 <= i < len(where.poll)}
+            if len(picked) != 1:
+                return SKIP
+            return SHOW if picked == {me} else gone_or_skip(picked.pop(), where, me, live, gone)
         return HINT if oldest(where, live) == me else SKIP
     if any(w.tag != me for w in live) or latest != me:
         return HINT if live and live[0].tag == me else SKIP
@@ -64,3 +69,9 @@ def route(reply, me, sent, live, latest, gone=()):
 def oldest(digest, live):
     """The tag of the digest's oldest member still waiting ("" for none)."""
     return next((w.tag for w in live if w.tag in digest.tags), "")
+
+
+def gone_or_skip(tag, digest, me, live, gone):
+    """A reply for a digest member that is not me: Gone when the Mac took it over and I am the digest's oldest
+    member still waiting (the one to say so), else SKIP."""
+    return Gone(tag) if tag in gone and oldest(digest, live) == me else SKIP

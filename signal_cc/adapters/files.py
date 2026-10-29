@@ -144,15 +144,21 @@ class FileGathering:
     def enter(self, tag, project, first):
         private.home(self.dir.parent)
         private.folder(self.dir)
-        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None})
+        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": None, "digest": None,
+                          "pid": os.getpid()})
 
     def entries(self):
+        """The entries of listeners still alive; one whose listener was killed before it could leave is removed."""
         out = {}
         for p in self.dir.glob("[!.]*") if self.dir.exists() else ():
             try:
-                out[p.name] = json.loads(p.read_text())
+                row = json.loads(p.read_text())
             except (OSError, ValueError):
                 continue
+            if alive(row.get("pid")):
+                out[p.name] = row
+            else:
+                private.remove(p)
         return out
 
     def update(self, tag, **fields):
@@ -161,13 +167,23 @@ class FileGathering:
             self._write(tag, {**row, **fields})
 
     def leave(self, tag):
-        (self.dir / tag).unlink(missing_ok=True)
+        private.remove(self.dir / tag)
 
     def lead(self):
         return self.lock.acquire()
 
     def unlead(self):
         self.lock.release()
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, TypeError):
+        return True  # another account's process, or an entry without a pid: leave it to the registry check
+    return True
 
 
 class DeskLock:

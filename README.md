@@ -183,9 +183,9 @@ Ports and adapters. Each layer imports only from the layers above it in this lis
 | Layer | Holds |
 |---|---|
 | `signal_cc/domain` | The rules, with no I/O: which prompt a reply belongs to (`routing`), how replies read as answers (`forms`), what the relay says (`texts`). |
-| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`, `Journal`. |
+| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Gathering` (the finished sessions that share a digest), `Presence`, `Journal`. |
 | `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`, `away` and `back`. |
-| `signal_cc/adapters` | signal-cli over HTTP, state files and the relay log under the config home (the away switch among them), macOS idle time, the relay's processes. |
+| `signal_cc/adapters` | signal-cli over HTTP, state files and the relay log under the config home (the away switch and the digest's `gather/` among them), macOS idle time, the relay's processes. |
 | `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks and builds adapters. |
 
 Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.

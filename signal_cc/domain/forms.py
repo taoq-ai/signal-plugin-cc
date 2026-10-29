@@ -151,7 +151,7 @@ class ContinueForm:
     LINE = 80
 
     def __init__(self, last_message, project):
-        last = (last_message or "Finished its turn.").strip()
+        last = (last_message or "").strip() or "Finished its turn."
         first = last.splitlines()[0]
         cut = first[:self.LINE]
         self.first = cut + ("\N{HORIZONTAL ELLIPSIS}" if cut != last else "")

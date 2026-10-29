@@ -43,7 +43,7 @@ class FakeMessenger:
 
     def send_poll(self, question, options, multi):
         if self.fail_polls:
-            raise RuntimeError("poll refused")
+            raise self.fail_polls if isinstance(self.fail_polls, Exception) else RuntimeError("poll refused")
         return self._out(f"POLL {question} {options} multi={multi}")
 
     def end_poll(self, ts):
@@ -155,6 +155,22 @@ class FakePresence:
 
     def returned(self):
         return self._returned
+
+
+class Leaving(FakePresence):
+    """The owner is at the Mac until n listeners have each looked once, then leaves: every one of them waited."""
+
+    def __init__(self, n):
+        super().__init__(away=False)
+        self.n, self.seen, self.lock = n, set(), threading.Lock()
+
+    def away(self):
+        with self.lock:
+            if self._away:
+                return True
+            self.seen.add(threading.get_ident())
+            self._away = len(self.seen) >= self.n
+            return False
 
 
 def quoting(text):

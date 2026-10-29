@@ -40,9 +40,16 @@ class Registry(Protocol):
 
 
 class Gathering(Protocol):
-    """The finished sessions waiting for the owner to leave, shared by every session on the Mac, so that the
-    sessions that finish together send one digest. An entry is a dict: created, project, first (its digest
-    line), sent (when its own message or a digest went out, or None) and digest (the digest it is in, or None)."""
+    """The finished sessions' messages, shared by every session on the Mac, so that the sessions that finished
+    while the owner was at the Mac send one digest when the owner leaves. An entry is a dict:
+
+    - created, project, first (its line in a digest);
+    - sent: when its own message or its digest went out, or None while it waits to;
+    - digest: the digest it went out in, or None: {"tags": the members, oldest first, "text": the digest
+      message's timestamp, "poll": the poll's timestamp or None, "options": the tags in the poll};
+    - gone (once set): why its listener stopped (AT_MAC or CLOSED), so a reply for it from the digest is told so.
+
+    An adapter may add its own keys."""
 
     def enter(self, tag: str, project: str, first: str) -> None:
         """Add the finished session's prompt, tagged tag."""

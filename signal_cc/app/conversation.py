@@ -28,18 +28,19 @@ class Conversation:
             self.registry.mark_latest(tag)  # before sending, so a fast plain reply finds it
         return self.messenger.send(text)
 
-    def ask(self, form, wait=None, leave_on_return=True, gather=False):
+    def ask(self, form, wait=None, leave_on_return=True, gather=False, join=False):
         """Send the form and its polls; return its answer.
 
         None when the owner is at the Mac, on timeout, when the event stream ends, or (with
-        leave_on_return) when the owner comes back to the Mac. With gather (a ContinueForm), the form may
-        go out in one digest with the other sessions that finished at the same time.
+        leave_on_return) when the owner comes back to the Mac. With gather (a ContinueForm), the form is
+        noted among the finished sessions, so a later digest can point at it; with join too, it may go out
+        in one digest with the other sessions that finished while the owner was at the Mac.
         """
         if not self.presence.away():
             return None
         end, started = {"tag": None, "outcome": "error"}, time.time()
         try:
-            return self._ask(form, wait or self.wait, leave_on_return, end, gather and self.gathering)
+            return self._ask(form, wait or self.wait, leave_on_return, end, gather and self.gathering, join)
         except SystemExit:  # the session's listener was stopped (hooks.quiet): a normal end, not a failure
             if end["outcome"] in ("error", "send failed"):
                 end["outcome"] = "quieted"
@@ -49,14 +50,16 @@ class Conversation:
                                  "outcome": end["outcome"], "waited": round(time.time() - started, 1),
                                  **({"digest": end["digest"]} if "digest" in end else {})})
 
-    def _ask(self, form, wait, leave_on_return, end, gathering):
+    def _ask(self, form, wait, leave_on_return, end, gathering, join):
         """ask, noting in end the prompt's tag and how it ended."""
         replies, close = self.messenger.subscribe()  # before sending, so no reply is missed
         tag = end["tag"] = self.registry.claim(form.text.splitlines()[0], wait)
         sent = {}  # timestamp of each message of this prompt -> the poll index it holds, None, or a Digest
         try:
             end["outcome"] = "send failed"
-            sent.update(self._gather(form, tag, gathering, end) if gathering else {})
+            if gathering:
+                gathering.enter(tag, form.project, form.first)
+                sent.update(self._gather(tag, gathering, end) if join else {})
             if not sent:
                 sent[self.say(tag, texts.tagged(tag, form.text))] = None
                 if gathering:
@@ -97,10 +100,9 @@ class Conversation:
                         pass
             close()
 
-    def _gather(self, form, tag, gathering, end):
+    def _gather(self, tag, gathering, end):
         """Join one digest with the other sessions that finished at the same time; return the digest's messages
         as sent entries, or {} for this session to send its own message (the only one finished)."""
-        gathering.enter(tag, form.project, form.first)
         while not gathering.lead():  # another session gathers: it may put this one in its digest
             digest = (gathering.entries().get(tag) or {}).get("digest")
             if digest:
@@ -128,8 +130,8 @@ class Conversation:
                 self.registry.mark_latest("")
                 digest["poll"] = self.messenger.send_poll(
                     texts.DIGEST_POLL, [texts.option(t, projects[t]) for t in digest["options"]], False)
-            except RuntimeError:
-                pass  # the digest's tags still work
+            except (OSError, RuntimeError):
+                pass  # refused or lost: the digest went out, and its tags still work
             now = time.time()
             for t in members:
                 gathering.update(t, digest=digest, sent=now)
@@ -163,8 +165,7 @@ class Conversation:
             if reply is None:
                 end["outcome"] = "stream ended" if value is None else "answered"
                 return value  # the stream ended
-            gone = {t for t, r in self.gathering.entries().items() if r.get("gone")} \
-                if any(isinstance(d, Digest) for d in sent.values()) else ()
+            gone = {t for t, r in self.gathering.entries().items() if r.get("gone")} if self.gathering else ()
             where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest(), gone)
             if isinstance(where, Gone):
                 self.say("", texts.tagged(where.tag, texts.GONE))
@@ -195,11 +196,14 @@ class Conversation:
 def continue_session(conversation, form, grace, wait):
     """A turn ended: once the owner is away, send its last message and return their reply.
 
-    If the owner stays at the Mac for grace seconds, they saw the result there: None, nothing sent.
+    If the owner stays at the Mac for grace seconds, they saw the result there: None, nothing sent. Only a
+    session that waited here (it finished while the owner was at the Mac) may go out in a digest; one that
+    found the owner away already sends its own message at once.
     """
-    deadline = time.time() + grace
+    deadline, waited = time.time() + grace, False
     while not conversation.presence.away():
         if time.time() > deadline:
             return None
+        waited = True
         time.sleep(POLL)
-    return conversation.ask(form, wait=wait, leave_on_return=False, gather=True)
+    return conversation.ask(form, wait=wait, leave_on_return=False, gather=True, join=waited)

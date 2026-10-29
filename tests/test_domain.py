@@ -62,6 +62,11 @@ class RoutingTest(unittest.TestCase):
             (Reply(f"[{OTHER}] go on"), [MINE, later], third, SKIP),
             (Reply(f"[{OTHER}] go on"), [MINE, later], "0d04", SKIP),  # not in the digest: knows nothing of it
             (Reply(f"[{third}] go on"), [MINE], ME, SKIP),  # this reply just woke third: not gone, no hint either
+            (Reply("", 202, [0]), [MINE, later], ME, Gone(OTHER)),  # picked a member taken over at the Mac
+            (Reply("", 202, [0]), [MINE, later], third, SKIP),
+            (Reply("", 202, [-1]), all3, third, SKIP),  # no such option, from either end
+            (Reply("", 202, [0, 1]), all3, ME, SKIP),  # a single-choice poll: two picks name no one
+            (Reply(f"[{OTHER}] go on"), [Waiting(0, "0d04", "Bash in x:"), MINE], "0d04", SKIP),  # older, not in it
         ]
         for reply, live, me, want in cases:
             with self.subTest(reply=reply, me=me, live=[w.tag for w in live]):
@@ -153,6 +158,11 @@ class FormsTest(unittest.TestCase):
                           "y" * 80 + "\N{HORIZONTAL ELLIPSIS}"])
         self.assertEqual(ContinueForm("\n\n  \nDone.", "p").first, "Done.")
         self.assertEqual(ContinueForm(None, "p").first, "Finished its turn.")
+        for blank in ("  \n", "\t", "\u2028"):  # whitespace only: today's message, never an error
+            with self.subTest(last=blank):
+                form = ContinueForm(blank, "p")
+                self.assertEqual((form.first, form.text), ("Finished its turn.",
+                                                          "p:\nFinished its turn.\n\nReply to continue this session."))
         sent_at = 1_800_000_000
         text = texts.digest([("a3f1", "ziran-paper", forms[0].first, None), ("7c20", "wuwei", forms[1].first, None),
                              ("e9b4", "signal-plugin-cc", "ignored", sent_at)])

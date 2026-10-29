@@ -148,7 +148,13 @@ class FilesTest(Base):
         second.update("aaaa", sent=5.0)
         second.update("bbbb", sent=1.0)  # left already: not brought back
         (self.home / "gather" / "cccc").write_text("{not json")  # half written: skipped
+        (self.home / "gather" / ".aaaa.1f2e").write_text("{}")  # a writer's temp file: not an entry
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        (self.home / "gather" / "dddd").write_text(json.dumps({"created": 1, "project": "p", "first": "x", "sent": None,
+                                                               "digest": None, "pid": dead.pid}))  # killed, never left
         self.assertEqual(list(second.entries()), ["aaaa"])
+        self.assertFalse((self.home / "gather" / "dddd").exists())
         row = second.entries()["aaaa"]
         self.assertEqual((row["project"], row["first"], row["sent"], row["digest"]), ("proj", "Done.", 5.0, None))
         self.assertTrue(first.lead())
@@ -296,6 +302,14 @@ class HooksTest(Base):
         self.assertIsNone(Listeners(self.home).get("s1"))
 
     def test_two_listeners_wired_to_real_files_send_one_digest(self):
+        looked, lock = set(), threading.Lock()
+
+        def idle():  # the owner is at the Mac until both listeners have looked once, then leaves
+            with lock:
+                done = len(looked) >= 2
+                looked.add(threading.get_ident())
+            return 1000 if done else 0
+        macos.idle_seconds = idle
         threads = [threading.Thread(target=conversation.continue_session,
                                     args=(wiring.conversation(self.cfg, s), ContinueForm("Done.", p), 5, 10))
                    for s, p in (("s1", "p1"), ("s2", "p2"))]
