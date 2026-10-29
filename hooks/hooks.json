@@ -3,6 +3,8 @@
     "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" start"}]}],
     "PermissionRequest": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" permission", "timeout": 3600}]}],
     "PreToolUse": [{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" question", "timeout": 3600}]}],
-    "Notification": [{"matcher": "idle_prompt", "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" notify"}]}]
+    "Stop": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" listen", "asyncRewake": true, "timeout": 86400}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" quiet"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/relay.py\" quiet"}]}]
   }
 }

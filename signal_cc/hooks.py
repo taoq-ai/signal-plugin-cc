@@ -2,7 +2,10 @@
 import json
 import os
 import re
+import signal
+import subprocess
 import sys
+import time
 import traceback
 
 from . import presence
@@ -92,10 +95,57 @@ def question(cfg, hook):
         "updatedInput": {**hook["tool_input"], "answers": answers}}}
 
 
-def notify(cfg, hook):
-    """Notification (idle_prompt): tell the owner a session is waiting."""
-    if presence.away(cfg):
-        Daemon(cfg).send(f"{project(hook)}: {hook.get('message', 'Claude is waiting for you')}")
+def listener(cfg, hook):
+    """The file holding the pid of this session's listener."""
+    return cfg.home / "listeners" / f"{hook.get('session_id', 'unknown')}.pid"
+
+
+def quiet(cfg, hook):
+    """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it."""
+    path = listener(cfg, hook)
+    try:
+        pid = int(path.read_text())
+    except (OSError, ValueError):
+        return
+    path.unlink(missing_ok=True)
+    cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
+    if pid != os.getpid() and "relay.py" in cmd:  # never a process that reused the pid
+        os.kill(pid, signal.SIGTERM)
+
+
+def listen(cfg, hook):
+    """Stop, in the background with asyncRewake: once the owner is away, send Claude's last message and
+    wake the session with the reply, so the conversation can go on from Signal.
+
+    If the owner stays at the Mac for cfg.wait seconds after the turn, they saw the result there and
+    nothing is sent. A reply wakes the session by exiting 2 with the reply on stderr.
+    """
+    quiet(cfg, hook)  # replace the listener of the session's previous turn
+    path = listener(cfg, hook)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(os.getpid()))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # quieted: let ask() clean up
+    try:
+        deadline = time.time() + cfg.wait
+        while not presence.away(cfg):
+            if time.time() > deadline:
+                return None
+            time.sleep(5)
+        last = (hook.get("last_assistant_message") or "Finished its turn.").strip()
+        if len(last) > 1500:
+            last = last[:1500] + "\N{HORIZONTAL ELLIPSIS}"
+        reply = ask(cfg, f"{project(hook)}:\n{last}\n\nReply to continue this session.",
+                    lambda r, target: r.text or None, wait=cfg.listen, leave_on_return=False,
+                    confirm=lambda _: f"Sent to {project(hook)}")
+    finally:
+        try:
+            if path.read_text() == str(os.getpid()):
+                path.unlink()
+        except OSError:
+            pass
+    if reply:
+        print(f"The owner replied from Signal, away from the Mac (signal-plugin-cc):\n{reply}", file=sys.stderr)
+        sys.exit(2)
 
 
 def start(cfg, hook):
@@ -105,7 +155,7 @@ def start(cfg, hook):
         daemon.start()
 
 
-HANDLERS = {"start": start, "permission": permission, "question": question, "notify": notify}
+HANDLERS = {"start": start, "permission": permission, "question": question, "listen": listen, "quiet": quiet}
 
 
 def main(argv=sys.argv):

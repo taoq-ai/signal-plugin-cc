@@ -71,14 +71,15 @@ PARTIAL = object()  # parse took the reply, but answers are still missing
 SETTLE = 5  # seconds to let taps on a multi-select poll settle before answering
 
 
-def ask(cfg, text, parse, polls=(), confirm=None):
+def ask(cfg, text, parse, polls=(), confirm=None, wait=None, leave_on_return=True):
     """Send text, then one poll per (question, options, multi) in polls; return the value parse builds.
 
     parse(reply, target) gets each Reply addressed to this prompt, with target the index of the poll it
     votes in or quotes, or None for the text message, its tag or a plain reply. It returns the final
     value, PARTIAL while answers are missing, or None for a reply it can't read (the owner is asked
     again). confirm(value), if given, is sent back as a short receipt; it also clears the spinner the
-    phone shows on a vote. None when the owner is at the Mac, on timeout, or when they come back.
+    phone shows on a vote. wait overrides cfg.wait. None when the owner is at the Mac, on timeout, or
+    (with leave_on_return) when they come back to the Mac.
     """
     if not presence.away(cfg):
         return None
@@ -94,14 +95,14 @@ def ask(cfg, text, parse, polls=(), confirm=None):
             except RuntimeError:
                 break  # the text message still takes replies
         value, settle = None, 0
-        deadline = time.time() + cfg.wait
+        deadline = time.time() + (wait or cfg.wait)
         while time.time() < deadline:
             if value is not None and time.time() >= settle:
                 break
             try:
                 reply = replies.get(timeout=2 if value is None else max(0.1, settle - time.time()))
             except queue.Empty:
-                if value is None and presence.returned():
+                if value is None and leave_on_return and presence.returned():
                     daemon.send(f"[{tag}] You're back at the Mac; answer there.", tag=tag)
                     return None
                 continue

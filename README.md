@@ -8,7 +8,9 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
 - **Questions (AskUserQuestion):** the bot sends the questions with their options, plus a poll per question.
   Tap the poll, quote a question's poll with an option number, its label or your own answer, or reply one line
   per open question. Answers can come in any order; after the last one you get a ✓ receipt and the polls close.
-- **Waiting for input:** when a session finishes and waits for you, the bot tells you.
+- **Conversation:** when a session finishes a turn while you're away, its last message comes to Signal. Reply
+  (quote it if several sessions wrote) and the session wakes with your reply as its next instruction, then
+  answers you the same way. Typing at the Mac or closing the session stops it listening.
 
 It only relays while you're away: if your Mac has had keyboard or mouse input in the last 60 seconds, Claude Code
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
@@ -52,7 +54,8 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
    ```
 
    With a bot number, add `"bot": "+BOTNUMBER"`. Optional keys: `wait` (seconds to wait for a reply, default
-   300, at most 3500), `idle` (seconds without input before the Mac counts as unattended, default 60), `port`
+   300, at most 3500), `idle` (seconds without input before the Mac counts as unattended, default 60), `listen` (seconds a
+   finished session waits for your reply, default 3600), `port`
    (signal-cli daemon port, default 8299), `signal_cli` (path to signal-cli). Only replies from `owner` are read.
    A misspelled or missing key is reported on stderr and turns the plugin off.
 
@@ -81,6 +84,8 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 
 ## Limits
 
+- A session that finished more than `wait` seconds (5 minutes) before you left the Mac doesn't write to you;
+  it assumes you saw its result. Closed sessions can't be reached.
 - While a prompt waits on Signal, the Mac doesn't show it; touching the keyboard or mouse hands it back.
 - Idle detection is macOS only. Elsewhere every prompt goes to Signal first, so lower `wait`.
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.

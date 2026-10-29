@@ -1,4 +1,6 @@
 """End-to-end checks of relay.py against a stub signal-cli HTTP daemon. Run: python3 -m unittest discover -s tests"""
+import contextlib
+import io
 import json
 import os
 import queue
@@ -225,6 +227,43 @@ class RelayTest(unittest.TestCase):
         out = hooks.question(self.cfg, {"tool_input": {"questions": qs}})["hookSpecificOutput"]
         self.assertEqual(out["updatedInput"]["answers"], {"Which db?": "Mongo"})
         self.assertEqual(Daemon.ended, [])
+
+    def test_listen_sends_the_last_message_and_wakes_the_session_with_the_reply(self):
+        Daemon.script.append(lambda m, ts: ("run the tests too", ts))
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as woke, contextlib.redirect_stderr(err):
+            hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj",
+                                    "last_assistant_message": "Refactor done; 7 tests pass."})
+        self.assertEqual(woke.exception.code, 2)
+        self.assertIn("run the tests too", err.getvalue())
+        self.assertIn("proj:\nRefactor done; 7 tests pass.", Daemon.sent[0])
+        self.assertIn("\N{CHECK MARK} Sent to proj", Daemon.sent[-1])
+        self.assertFalse((self.cfg.home / "listeners" / "s1.pid").exists())
+
+    def test_listen_stays_silent_when_the_owner_stays_at_the_mac(self):
+        presence.idle_seconds = lambda: 0
+        real, hooks.time.sleep = hooks.time.sleep, lambda s: real(0.05)
+        try:
+            self.assertIsNone(hooks.listen(replace(self.cfg, wait=0.2), {"session_id": "s2"}))
+        finally:
+            hooks.time.sleep = real
+        self.assertEqual(Daemon.sent, [])
+
+    def test_quiet_stops_the_session_listener_and_nothing_else(self):
+        fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "relay.py"])
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            pids = self.cfg.home / "listeners"
+            pids.mkdir(parents=True)
+            (pids / "s3.pid").write_text(str(fake.pid))
+            (pids / "s4.pid").write_text(str(other.pid))
+            hooks.quiet(self.cfg, {"session_id": "s3"})
+            hooks.quiet(self.cfg, {"session_id": "s4"})  # not a relay process: left alone
+            self.assertIsNotNone(fake.wait(timeout=5))
+            self.assertIsNone(other.poll())
+        finally:
+            fake.kill()
+            other.kill()
 
     def test_at_the_mac_nothing_is_sent(self):
         presence.idle_seconds = lambda: 5

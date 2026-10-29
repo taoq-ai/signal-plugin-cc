@@ -16,6 +16,7 @@ class Config:
     port: int = 8299  # signal-cli HTTP daemon port
     wait: int = 300  # seconds to wait for a reply
     idle: int = 60  # seconds without input before the Mac counts as unattended
+    listen: int = 3600  # seconds a finished session waits for a reply that continues it
     signal_cli: str = "signal-cli"
 
     @property
