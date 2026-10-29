@@ -1,6 +1,6 @@
 {
   "name": "signal-relay",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "description": "Answer Claude Code permission prompts, questions and plan approval from Signal while you're away from your Mac.",
   "homepage": "https://github.com/taoq-ai/signal-plugin-cc",
