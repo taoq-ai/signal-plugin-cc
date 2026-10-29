@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import private
+
 RELAY = Path(__file__).resolve().parents[2] / "relay.py"
 
 
@@ -39,8 +41,8 @@ def stop(pid):
 
 def spawn(command, log):
     """Run relay.py <command> in the background, detached from the hook that starts it."""
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "ab") as out:
+    private.home(log.parent)
+    with private.open_file(log, "ab") as out:
         subprocess.Popen([sys.executable, str(RELAY), command], stdin=subprocess.DEVNULL, stdout=out,
                          stderr=out, start_new_session=True)
 
