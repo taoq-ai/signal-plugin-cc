@@ -1,0 +1,686 @@
+{
+ "items": [
+  {
+   "id": "listener-lifetime",
+   "title": "Signal replies keep reaching a session across its own turns",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "standard",
+   "framework": "wsjf",
+   "scores": {
+    "value": 13,
+    "time": 8,
+    "risk": 8,
+    "size": 2
+   },
+   "score": 14.5,
+   "why": "Owner 2026-10-29: replying from Signal while a session waits does not reach it. Seen in this session: every self-started turn (a background agent's report) fires UserPromptSubmit, so quiet() stops the listener and turns away off; listeners/ was empty while the owner thought a reply would land. The next listener only knows its own message, so a reply quoting the earlier one is dropped.",
+   "promise": "quiet() treats a self-started turn (a prompt carrying the task-notification wrapper or the wake text) like a Signal wake: the listener and the away switch stay as they are. A reply quoting or tagging any message a session sent while its turns continue reaches that session's current listener, not only the latest message. Typed prompts at the Mac still stop the listener and turn away off.",
+   "acceptance": [
+    "Given a session waiting on Signal, when a UserPromptSubmit carrying a task-notification arrives, then the listener keeps running and away stays on.",
+    "Given a session whose listener was replaced by a later turn's listener, when the owner quotes the earlier message, then the reply wakes that session.",
+    "Given a prompt typed at the Mac, when quiet() runs, then the listener stops and away turns off, as today."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:36:25.331229+00:00"
+  },
+  {
+   "id": "self-started-shapes",
+   "title": "Other turns Claude starts on its own keep the Signal listener",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "standard",
+   "framework": "wsjf",
+   "scores": {
+    "value": 5,
+    "time": 3,
+    "risk": 5,
+    "size": 1
+   },
+   "score": 13.0,
+   "why": "listener-lifetime arch gate (2227f93): local transcripts show other self-started prompt shapes counted as typed, so they still stop the listener and turn away off: agent-message (3,834 seen), ci-monitor-event (273), cross-session-message (36).",
+   "promise": "quiet() also treats prompts that open with the agent-message and ci-monitor-event wrappers as self-started. cross-session-message is decided by the owner first (one trust question), since another session writing to this one is closer to an outside instruction than to a report.",
+   "acceptance": [
+    "Given a UserPromptSubmit opening with an agent-message or ci-monitor-event wrapper, when quiet() runs, then the listener keeps running and away stays on.",
+    "Given the owner's answer on cross-session-message, when such a prompt arrives, then quiet() follows that answer, with a test."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": false,
+   "changed": "2026-10-29T19:41:50.230662+00:00"
+  },
+  {
+   "id": "ps-flake",
+   "title": "Make the ps-based tests deterministic",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 3,
+    "time": 3,
+    "risk": 5,
+    "size": 1
+   },
+   "score": 11.0,
+   "why": "leave-digest quality gate (40fa908): 3 failures in 80 serial runs on main and the head, all in the existing ps-based tests (headless tests and the stop test), starting with #1 and #4; with main protected by required checks, a flake blocks merges.",
+   "promise": "The headless and stop tests no longer race the processes they start: they wait for the process to be visible to ps (or read a fake ps), and pass 200 serial runs on 3.9 and 3.14.",
+   "acceptance": [
+    "Given 200 serial runs of the suite on /usr/bin/python3 and on 3.14, when they finish, then none fails."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:36:25.331236+00:00"
+  },
+  {
+   "id": "release-ci",
+   "title": "Release PRs run the tests without a close and reopen",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 3,
+    "time": 3,
+    "risk": 3,
+    "size": 1
+   },
+   "score": 9.0,
+   "why": "Release PR #10, 2026-10-29: opened by release-please with GITHUB_TOKEN, so tests.yml did not run and WUWEI waited on CI; the planner closed and reopened it from the owner's account to trigger CI. This repeats on every release.",
+   "promise": "Release PRs get the Tests run on their own, with no manual step, and no new long-lived secret beyond what the owner sets up (for example a GitHub App token for release-please, or tests.yml also running on the release-please branch push).",
+   "acceptance": [
+    "Given release-please opens or updates its release PR, when CI is read, then the Tests run exists at the PR head without anyone closing or reopening it."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:36:25.331238+00:00"
+  },
+  {
+   "id": "wake-text",
+   "title": "Wake text names signal-relay, still matching old listeners",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 3,
+    "time": 2,
+    "risk": 3,
+    "size": 1
+   },
+   "score": 8.0,
+   "why": "mac-answer-notice builder: after the rename (#7), the WOKEN text in entry/hooks.py still ends with (signal-plugin-cc); quiet() matches that exact text, so a plain rename would make a session woken by an older listener turn the away switch off.",
+   "promise": "The wake text names signal-relay, and quiet() treats both the old and the new wake text as a Signal wake, with a test for each.",
+   "acceptance": [
+    "Given a UserPromptSubmit whose prompt carries the old or the new wake text, when quiet() runs with the switch on, then the switch stays on."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:47:01.820328+00:00"
+  },
+  {
+   "id": "claude-md-hooks",
+   "title": "CLAUDE.md: what the hooks really see",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 3,
+    "time": 2,
+    "risk": 3,
+    "size": 1
+   },
+   "score": 8.0,
+   "why": "Retro 2026-10-29 proposal 1: five seats re-learned that UserPromptSubmit fires for turns Claude Code starts itself and that a typed prompt turns away off; the repo has no CLAUDE.md.",
+   "promise": "A short CLAUDE.md in the repo states the hook facts seats keep re-learning: UserPromptSubmit fires for self-started turns (task notifications, Signal wakes), asyncRewake wakes queue like task notifications, claude -p waits for an asyncRewake Stop hook, a prompt typed into a session counts as the owner at the Mac, and live checks need a captured hook input on the owner's version.",
+   "acceptance": [
+    "Given a new seat in this repo, when it reads CLAUDE.md, then the hook facts are there with the date and Claude Code version they were measured on."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": false,
+   "changed": "2026-10-29T19:57:33.957911+00:00"
+  },
+  {
+   "id": "poll-spinner",
+   "title": "Clear the phone's spinner after a poll vote in Note to Self",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 5,
+    "time": 3,
+    "risk": 3,
+    "size": 2
+   },
+   "score": 5.5,
+   "why": "Owner, live test 2026-10-29 (publish-v1): after a poll vote in Note to Self the spinner keeps spinning past the relay's check-mark receipt and the closed poll; earlier the owner saw it clear only when they sent something from the phone themselves. Incoming relay messages (notifySelf) do not clear it.",
+   "promise": "Probe first, with the owner watching the phone: (a) the receipt sent as a Note to Self sync (no notifySelf), (b) a delivery or read receipt for the vote's timestamp via signal-cli; adopt the first that clears the spinner, with a test pinning the call. If neither does, record the finding and document the spinner as a Signal client limit in the README.",
+   "acceptance": [
+    "Given the owner votes in a relayed poll, when the relay answers, then the phone's spinner clears within a few seconds (the owner confirms), or the README states the limit and the probe evidence is recorded."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:58:20.178261+00:00"
+  },
+  {
+   "id": "leave-digest",
+   "title": "One digest when the owner leaves with several finished sessions",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 5,
+    "risk": 3,
+    "size": 8
+   },
+   "score": 2.0,
+   "why": "Largest G-2 follow-up; lands after away-switch (which defines leaving) and mac-answer-notice (same listener end paths in conversation.py and hooks.py).",
+   "promise": "When the owner leaves the Mac with several finished sessions waiting, Signal gets one digest instead of one message each, and a reply still reaches exactly one session. The digest lists each session's tag, project and first line. A reply that starts with a tag, or picks a session in the digest's poll, reaches that session; a plain reply to the digest gets the existing hint. First step: the spec shows the owner a text mock of the digest and its reply rules, the cheapest check against 'reply to a specific message'. Files: signal_cc/app/conversation.py, signal_cc/domain/routing.py, signal_cc/domain/texts.py, signal_cc/domain/forms.py, signal_cc/ports.py, signal_cc/adapters/files.py, signal_cc/entry/hooks.py, tests/test_domain.py, tests/test_app.py, tests/test_adapters.py, README.md, and the spec engine's artifacts. Outside: permission prompts and questions, which still go one by one.",
+   "acceptance": [
+    "Given three sessions finished while the owner was at the Mac, when the owner leaves, then Signal gets one message listing three tags and projects, not three messages.",
+    "Given the digest, when the owner replies '[a3f1] run the tests too', then only session a3f1 wakes, with 'run the tests too'.",
+    "Given the digest, when the owner sends a plain reply quoting it, then the relay answers with the hint and no session wakes.",
+    "Given one session finished, when the owner leaves, then it gets today's single message, and a plain or quoted reply works as now.",
+    "Given a listed session was taken over at the Mac, when the owner replies to it from the digest, then nothing is delivered and Signal says that session no longer listens.",
+    "Given the head, when tests/test_domain.py runs, then the routing table holds the digest cases and no reply crosses sessions."
+   ],
+   "prs": [],
+   "domain": "complex: one listener process per session must agree on one message, and a new routing rule must keep every reply reaching exactly one session; whether it still feels like replying to a specific message shows only once used",
+   "in_doubt": false,
+   "class": "standard",
+   "after": [
+    "away-switch",
+    "mac-answer-notice"
+   ],
+   "host": "agent",
+   "status": "open",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:36:52.846467+00:00",
+   "kind": "run",
+   "reason": "Step 1 cheap check: text mock of the digest, its poll and reply rules written (scratchpad leave-digest-mock.md); waiting on the owner's reaction to three design choices before building."
+  },
+  {
+   "id": "rewake-probe",
+   "title": "Probe asyncRewake: headless runs and more than 8 Signal wakes",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 13,
+    "risk": 20,
+    "size": 1
+   },
+   "score": 41.0,
+   "why": "Riskiest unknown first: the binary suggests claude -p runs this Stop hook synchronously (up to 300 s at the Mac, 3600 s away) and that wakes may cap at 8; one hour of probing decides install-guards.",
+   "promise": "A run, not a change. In a new scratch folder (not this repo, whose untracked .claude/settings.local.json carries the owner's live relay hooks), with throwaway hooks, measure on Claude Code 2.1.311 and record with wuwei plan run: (1) whether claude -p waits for a Stop hook marked asyncRewake; (2) how many consecutive asyncRewake wakes (exit 2) an interactive session takes with no typed prompt, past 8; (3) what the woken turns' Stop input and the hook environment carry (stop_hook_active, and the variable that marks a print-mode run, such as CLAUDE_CODE_ENTRYPOINT), so install-guards can tell a headless run apart. Outside: any change to signal_cc. If wakes stop at 8 or fewer, file the follow-up before closing.",
+   "acceptance": [
+    "Given a scratch folder whose .claude/settings.local.json holds a Stop hook with asyncRewake true that sleeps 20 s and then writes a marker file, when claude -p 'reply ok' runs there, then the record states the wall time and whether the run waited for the hook.",
+    "Given an interactive claude session in a detached screen with an asyncRewake Stop hook that exits 2 with 'reply with the next number' up to 12 times and logs each call, when one typed prompt starts it and nobody types again, then the record states how many wakes happened and whether the 9th to 12th did.",
+    "Given both hooks log their stdin and the names of their environment variables, when they run in print mode and in interactive mode, then the record lists stop_hook_active for each call and the variable that tells the two modes apart, with no secret values copied.",
+    "Given wakes stop at or before the 9th, when the run is recorded, then a follow-up item names the cap and a mitigation (for example a Signal notice that the session needs a prompt typed at the Mac)."
+   ],
+   "prs": [],
+   "domain": "complex: what Claude Code 2.1.311 does shows only by running it; its binary reads CLAUDE_CODE_STOP_HOOK_BLOCK_CAP ?? 8 and backgrounds asyncRewake only when the session is interactive or has streaming input, which suggests but does not prove both risks",
+   "in_doubt": false,
+   "class": "expedite",
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T14:56:19.376842+00:00",
+   "kind": "run",
+   "reason": "Claude Code 2.1.311: claude -p waits for an asyncRewake Stop hook (38-40 s run, 21 s hook); an interactive session took 12 consecutive wakes with no typed prompt (calls 9-12 ran, no cap hit); stop_hook_active false on the first Stop, true on woken turns; CLAUDE_CODE_ENTRYPOINT is sdk-cli in print mode and cli interactively, but a child inherits claude-desktop from the desktop app, so install-guards must not trust an inherited value. No follow-up needed."
+  },
+  {
+   "id": "rename-plugin",
+   "title": "Rename the plugin to signal-relay and record the publish decisions",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 13,
+    "time": 13,
+    "risk": 8,
+    "size": 1
+   },
+   "score": 34.0,
+   "why": "Owner one-way answers 2026-10-29: rename the plugin from 'signal' to 'signal-relay' before going public (a bare 'signal' can read as an official Signal integration); publish the history as is (leone.lage@gmail.com is already public in taoq-ai/wuwei).",
+   "promise": "The plugin installs as signal-relay@signal-plugin-cc: .claude-plugin/plugin.json and marketplace.json name it signal-relay, the README install lines match, and claude plugin validate --profile directory passes. docs/adr/0001-publish-signal-plugin-cc.md records both owner decisions (context, decision, consequences, the owner's answer). The repository name, hooks and config are unchanged.",
+   "acceptance": [
+    "Given the head, when claude plugin validate . --profile directory runs, then it passes and the plugin name is signal-relay.",
+    "Given the README, when a reader follows Setup, then the install command is /plugin install signal-relay@signal-plugin-cc.",
+    "Given docs/adr/0001-publish-signal-plugin-cc.md, when read, then it records the rename and the decision to publish the history as is, each with the owner's answer."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:09:25.963336+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#7 (a6b13f8) on owner OK. Plugin installs as signal-relay@signal-plugin-cc; docs/adr/0001-publish-signal-plugin-cc.md records the owner's one-way answers (rename; publish history as is). Quality PASS (822ce96, merge-only delta to bde4349), claude plugin validate --profile directory passes, CI green on all three legs."
+  },
+  {
+   "id": "config-perms",
+   "title": "Keep the relay's state private: config folder 0700, no symlink follow",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "standard",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 8,
+    "risk": 8,
+    "size": 1
+   },
+   "score": 24.0,
+   "why": "Security gate on #3 (relay-log, b2c4f84): the config home is created 0755 and relay.log, pending/ (first line of each prompt) and the away and last files 0644, readable by other local accounts; writes follow a planted symlink.",
+   "promise": "The relay creates its config home 0700 and its files 0600, and tightens an existing home it owns; writes to relay.log, last, away and pending/ do not follow a symlink.",
+   "acceptance": [
+    "Given a fresh home, when any hook runs, then the folder is 0700 and every file it writes is 0600.",
+    "Given a symlink planted at relay.log, when a prompt is logged, then the target is not written and the hook still exits 0 with no output."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:55:31.892100+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#8 (0e70533) on owner OK. Home 0700, files 0600, O_NOFOLLOW on every write; security PASS (b8c3163, 14/14 symlink probes through the real hook), quality PASS after fix round 1 (80c27a8). CI green on all three legs, 83 tests."
+  },
+  {
+   "id": "publish-v1",
+   "title": "Publish v1: fresh install relays a prompt and a question, then the repo goes public",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "light",
+   "framework": "wsjf",
+   "scores": {
+    "value": 20,
+    "time": 13,
+    "risk": 8,
+    "size": 2
+   },
+   "score": 20.5,
+   "why": "G-1's closing run; waits on land-status-ci (CI on main) and install-guards (so the install cannot hold headless runs); the visibility flip is one-way and needs the owner's OK.",
+   "promise": "A run, not a change: G-1's evidence, recorded with wuwei plan run. After land-status-ci and install-guards merge: (1) in a new scratch project, claude plugin marketplace add taoq-ai/signal-plugin-cc, then claude plugin install signal@signal-plugin-cc --scope local, so no other session gets the hooks; (2) with the owner away from the Mac (or the away switch on, if it has landed), one permission prompt and one AskUserQuestion go to Signal, the owner answers on the phone (a reaction and a poll vote), and the session gets both answers; note whether the poll-vote spinner clears; (3) with the owner's OK on the one-way step, gh repo edit taoq-ai/signal-plugin-cc --visibility public --accept-visibility-change-consequences; (4) the latest Tests run on main is green. Owner decisions for the planner to put before step 3: going public publishes the author email on all 11 commits (history is not rewritten), and fixes 'signal' as the install name, which is hard to change once others install and which the directory's policy review may read as a claim of affiliation with Signal. Outside: the user-scope install for daily use (the owner's call, after install-guards); directory submission (G-3).",
+   "acceptance": [
+    "Given a scratch project with the plugin installed at local scope from the marketplace, when Claude asks to run a Bash command while the owner is away, then Signal shows the prompt and a thumbs-up reaction lets the command run.",
+    "Given the same session, when Claude calls AskUserQuestion, then Signal shows the question and a poll, and the owner's vote becomes the session's answer.",
+    "Given both answers, when the run is recorded, then the record states whether the poll-vote spinner cleared, and when.",
+    "Given the owner confirmed the visibility step, when gh repo view taoq-ai/signal-plugin-cc --json visibility runs, then it reads PUBLIC. Rollback: gh repo edit --visibility private (forks and clones made meanwhile remain).",
+    "Given main after the merges, when gh run list -R taoq-ai/signal-plugin-cc -b main runs, then the latest Tests run is green."
+   ],
+   "prs": [],
+   "domain": "complicated: the first /plugin install path is untested (plugin cache path, python3 resolution, a desk spawned from the cache); each failure can be analysed",
+   "in_doubt": false,
+   "class": "fixed-date",
+   "after": [
+    "land-status-ci",
+    "install-guards"
+   ],
+   "host": "session",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:56:43.950512+00:00",
+   "kind": "run",
+   "reason": "G-1 evidence 2026-10-29: signal-relay@signal-plugin-cc 0.3.0 installed from the public marketplace at local scope in a scratch project; an interactive session (manual mode) asked a Bash permission and an AskUserQuestion while the Mac was idle; the owner answered from the phone, a thumbs-up and a poll answer; relay.log: permission tag 9531 answered after 54.3 s, question tag d6d6 answered after 10.2 s; the file was created and the session got Red. Repo PUBLIC, main protected by ruleset 26150186 (owner ran both), Tests on main green at 3771618. Spinner observation still to come from the owner. Learned: a prompt typed into the session counts as the owner at the Mac and turns away off, so live tests must rely on idle time."
+  },
+  {
+   "id": "land-status-ci",
+   "title": "Land the status command, CI and the ports-and-adapters refactor through a PR",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 13,
+    "time": 13,
+    "risk": 13,
+    "size": 2
+   },
+   "score": 19.5,
+   "why": "Must land first: every other code item edits the files it rewrites, and G-1 needs CI on main.",
+   "promise": "The two unpushed commits on feat/status-ci-architecture (bfd4908 status command and GitHub Actions CI; a3f918a ports and adapters) reach main of taoq-ai/signal-plugin-cc through one PR, with CI green on the PR and on main after the merge. Files: those of the two commits (README.md, relay.py, signal_cc/**, tests/**, .github/workflows/tests.yml). Outside: new behaviour; the untracked .claude/ folder in the main worktree (WUWEI settings and the owner's live-test hooks from another session) is never committed. Blocker to record, not ask: a push that adds .github/workflows/tests.yml needs a credential with the workflow scope. gh's token lists workflow (gh auth status, 2026-10-29), but git pushes through the osxkeychain helper, which may hold another token; if GitHub refuses the push, the item waits on the owner step gh auth setup-git (or gh auth refresh -h github.com -s workflow).",
+   "acceptance": [
+    "Given the branch at a3f918a, when it is pushed and a PR to main is opened, then the Tests workflow runs on Python 3.10 and 3.14 and passes.",
+    "Given the PR head, when python3 -m unittest discover -s tests runs, then all 33 tests pass, the import-boundary test among them.",
+    "Given the PR is merged after the owner's OK, when the push to main triggers Tests, then the run on main is green and the README badge shows passing.",
+    "Given GitHub refuses the push for the workflow scope, when the builder reports, then the item is marked blocked on the owner step with the exact refusal text, and no other route is tried."
+   ],
+   "prs": [],
+   "domain": "complicated: a behaviour-preserving restructure plus the status desk, already built; 33 tests pass at a3f918a on Python 3.9.6 and 3.14.5 and an import-boundary test guards the layers",
+   "in_doubt": false,
+   "class": "fixed-date",
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T15:30:07.786220+00:00",
+   "kind": "run",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#1 (55f491f) on owner OK. Gates at 0553016: quality PASS (a3f918a, carried), security PASS (a3f918a, carried), arch PASS after fix round 1. CI Tests green on the PR (3.10, 3.14) and on main at 55f491f. 36 tests."
+  },
+  {
+   "id": "path-guards",
+   "title": "Refuse a foreign config home, unsafe session ids and symlinked cleanup",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "standard",
+   "framework": "wsjf",
+   "scores": {
+    "value": 5,
+    "time": 5,
+    "risk": 8,
+    "size": 1
+   },
+   "score": 18.0,
+   "why": "Security notes on land-status-ci (a3f918a) and config-perms (b8c3163): a session_id like ../../escape or an absolute path becomes a file path outside the home; a config home owned by another account is used as is, leaving a check-then-open gap; Listeners.clear deletes through a symlinked listeners/ folder.",
+   "promise": "A session id is used as a file name only if it is a plain token (letters, digits, dash, underscore); anything else is skipped with a stderr line and no write. The relay refuses a config home it does not own (stderr line, hook exits 0, no output). Removing a listener's pid file never follows a symlinked listeners/ folder.",
+   "acceptance": [
+    "Given session_id ../../escape or an absolute path, when listen or quiet runs, then nothing is written or deleted outside the home and the hook exits 0 with no output.",
+    "Given a config home owned by another account, when any hook runs, then it writes nothing there and exits 0 with no output.",
+    "Given listeners/ symlinked outside the home, when quiet runs, then no file outside the home is deleted."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:35:45.131708+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#11 (3771618) on owner OK. Quality PASS (8/8 mutants killed), security PASS (147/147 hook probes at the head vs 10/147 on main; 30 hostile session ids; foreign and root homes refused; symlinked listeners/ never deleted through). 91 tests."
+  },
+  {
+   "id": "install-guards",
+   "title": "A fresh install does no harm: no Stop listener in headless runs, silent where it cannot run",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 13,
+    "time": 13,
+    "risk": 8,
+    "size": 2
+   },
+   "score": 17.0,
+   "why": "Lands after rewake-probe (which names the print-mode marker) and land-status-ci (same hooks.py and workflow file); must precede publish-v1.",
+   "promise": "A fresh install does no harm where the relay cannot or should not act. In a non-interactive run (claude -p), detected by the marker rewake-probe recorded, the Stop listener exits at once and sends nothing. Where fcntl cannot be imported (Windows), every hook exits 0 with no output instead of failing at import. CI adds Python 3.9, the macOS system python3 (3.9.6). README gains a Requirements line (macOS; Linux without idle detection; not Windows), and plugin.json gains homepage and repository. Files: signal_cc/entry/hooks.py, signal_cc/entry/cli.py or relay.py, .github/workflows/tests.yml, .claude-plugin/plugin.json, README.md, tests/test_adapters.py. Outside: permission and question relays in headless runs (unchanged), the away switch, the plugin's name.",
+   "acceptance": [
+    "Given a Stop hook input and environment from a non-interactive run, when relay.py listen runs, then it returns within 1 s, makes no call to signal-cli and records no listener.",
+    "Given an interactive session's Stop input, when relay.py listen runs, then it behaves as before (test_listen_wakes_the_session_with_the_reply still passes).",
+    "Given fcntl cannot be imported, when relay.py runs any handler, then it exits 0 with empty stdout and stderr (a test simulates the missing module).",
+    "Given the PR, when CI runs, then the matrix includes Python 3.9 and every job passes.",
+    "Given the head, when claude plugin validate --profile directory runs on it, then it passes with no finding beyond ICON_MISSING."
+   ],
+   "prs": [],
+   "domain": "complicated: once rewake-probe names the print-mode marker, the fix is an early return in listen and an import guard; it changes when the relay acts, which the measured signals will gate",
+   "in_doubt": false,
+   "class": "fixed-date",
+   "after": [
+    "rewake-probe",
+    "land-status-ci"
+   ],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T16:36:47.950772+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#4 (c7d7222) on owner OK. Gates: quality PASS (8004cc6, delta bcc6071), security PASS (9a17b81, delta 2d443e6). Live claude -p probe: headless() true with an inherited claude-desktop entrypoint. CI green on macOS system 3.9.6, ubuntu 3.10 and 3.14 (62 tests)."
+  },
+  {
+   "id": "mac-answer-notice",
+   "title": "Tell Signal when the Mac takes over a finished session's message",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 5,
+    "risk": 5,
+    "size": 2
+   },
+   "score": 17.0,
+   "why": "G-2 follow-up; must land after relay-log, since both change how Conversation.ask ends.",
+   "promise": "A finished session's message on Signal is told when the Mac takes over. When a listener stops because the owner typed a prompt at the Mac (UserPromptSubmit) or the session ended (SessionEnd), the relay sends one short notice tagged to that message (for example '[a3f1] Answered at the Mac; replies here no longer reach this session', or that the session closed), and relay.log records outcome answered at the Mac. Files: signal_cc/app/conversation.py, signal_cc/entry/hooks.py, signal_cc/adapters/processes.py, signal_cc/domain/texts.py, tests/test_app.py, tests/test_adapters.py, README.md. Outside: editing or deleting earlier messages; permission and question prompts, which already send the back-at-the-Mac notice.",
+   "acceptance": [
+    "Given a finished session's message waits on Signal, when the owner types a prompt in that session at the Mac, then Signal gets one notice with that message's tag and the session is not woken.",
+    "Given a finished session's message waits on Signal, when the session ends, then Signal gets one notice that the session closed.",
+    "Given the message is answered on Signal or times out, when the listener ends, then no Mac notice is sent.",
+    "Given the notice is sent, when relay.log is read, then the prompt's line has outcome answered at the Mac."
+   ],
+   "prs": [],
+   "domain": "complicated: the listener must learn why it ended (stopped by quiet versus timed out or answered) and send one notice before it exits",
+   "in_doubt": false,
+   "class": "standard",
+   "after": [
+    "relay-log"
+   ],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:35:00.955174+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#6 (ba5a872) on owner OK. Gates: arch and quality PASS (1754306), quality deltas PASS (415039f, 8baf808). Real-subprocess probe of all five endings (typed at the Mac, session end, new turn, answered, timed out). CI green on all three legs, 75 tests."
+  },
+  {
+   "id": "release-please",
+   "title": "Release with release-please: changelog, tags and the plugin version",
+   "goal": "G-1",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "standard",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 13,
+    "risk": 5,
+    "size": 2
+   },
+   "score": 13.0,
+   "why": "Owner 2026-10-29: add release-please before publish-v1. Today versions are bumped by hand in .claude-plugin/plugin.json (0.2.0 in #2, 0.3.0 in #5); no tags, releases or CHANGELOG. Squash titles since #2 are Conventional Commits.",
+   "promise": "A release-please workflow (contents: write, pull-requests: write, action pinned by sha) keeps a release PR with CHANGELOG.md, bumps .claude-plugin/plugin.json version through extra-files, and tags and publishes a GitHub release when that PR merges; v0.3.0 is the first release. If the repository setting that lets Actions open pull requests is off, that is an owner step recorded on the item, not a workaround.",
+   "acceptance": [
+    "Given the workflow on main, when a feat or fix commit lands, then a release PR exists that bumps plugin.json and adds CHANGELOG.md entries.",
+    "Given the release PR merges, when the workflow runs, then a tag and GitHub release exist and plugin.json matches the tag.",
+    "Given the first run, when it completes, then the first release is v0.3.0 and no earlier version is published."
+   ],
+   "prs": [],
+   "domain": "",
+   "in_doubt": false,
+   "class": null,
+   "after": [],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T18:04:58.490424+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#9 (9d6cefe) on owner OK; quality PASS (3945704, 0.3.0 confirmed by a dry run of release-please 17.3.0), security PASS. First run opened release PR #10 (0.3.0, CHANGELOG #3-#9, #5 under breaking changes); CI triggered by close/reopen, green; merged on owner OK (86d57a1). Release v0.3.0 published, tag v0.3.0 at 86d57a1, plugin.json 0.3.0 matches."
+  },
+  {
+   "id": "away-switch",
+   "title": "Away switch: tell the relay from Signal that you are away or back",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 8,
+    "risk": 5,
+    "size": 3
+   },
+   "score": 12.33,
+   "why": "G-2 follow-up; lands after land-status-ci; leave-digest waits on it because the digest fires when the owner leaves.",
+   "promise": "The owner can say from Signal that they are away or back, and the relay follows that over the idle timer. A plain 'away' turns the switch on: prompts go to Signal whatever the idle time, and Mac input does not hand them back. A plain 'back', or a prompt typed at the Mac (UserPromptSubmit), turns it off. 'status' shows whether it is on. Where idle time is unknown (not macOS), the owner counts as at the computer unless the switch is on, replacing 'every prompt goes to Signal first'. Files: signal_cc/domain/routing.py, signal_cc/domain/texts.py, signal_cc/app/desk.py, signal_cc/ports.py, signal_cc/adapters/macos.py, signal_cc/adapters/files.py, signal_cc/entry/hooks.py, signal_cc/entry/wiring.py, tests/test_domain.py, tests/test_app.py, tests/test_adapters.py, README.md. Outside: a slash command at the Mac; a timer that turns the switch off.",
+   "acceptance": [
+    "Given the switch is off and the Mac had input 5 s ago, when the owner sends 'away' on Signal, then the desk confirms and the next permission prompt goes to Signal.",
+    "Given the switch is on, when the Mac sees input while a prompt waits on Signal, then the prompt stays on Signal (no back-at-the-Mac hand-back).",
+    "Given the switch is on, when the owner sends 'back' or types a prompt at the Mac, then the switch is off and idle time decides again.",
+    "Given idle time is unknown, when a permission prompt arrives with the switch off, then nothing is sent to Signal; with the switch on, it goes to Signal.",
+    "Given a reply 'away' that quotes a waiting prompt, when it arrives, then it is read as that prompt's answer, not as a command.",
+    "Given the owner sends 'status', when the desk answers, then the answer says whether the switch is on."
+   ],
+   "prs": [],
+   "domain": "complicated: two desk commands and a presence override through the existing Presence port; it changes the default where idle time is unknown",
+   "in_doubt": false,
+   "class": "standard",
+   "after": [
+    "land-status-ci"
+   ],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T16:15:57.687591+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#2 (fbc44e1) on owner OK, breaking: confirmed at db260bb, v0.2.0. Gates: quality PASS (94be975), arch PASS after fix round 1 (db260bb). CI green on main at fbc44e1."
+  },
+  {
+   "id": "relay-log",
+   "title": "Record every relay outcome locally, and a relay-failure label to file them",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 13,
+    "risk": 8,
+    "size": 3
+   },
+   "score": 9.67,
+   "why": "Measurement first for G-2: the 7 days need the log before day 1; lands after land-status-ci, and mac-answer-notice waits on it (both change the end of Conversation.ask).",
+   "promise": "Every relay outcome is recorded, so G-2's targets are counted. A Journal port with a file adapter appends one JSON line per prompt end to <home>/relay.log: time, kind (permission, question, continue), tag, session id, outcome (answered, timed out, back at the Mac, stream ended, send failed, error) and seconds waited; never message text or phone numbers. Exceptions that entry/cli.py catches are recorded with the handler and exception type. The repo gains a relay-failure label (operator step: gh label create relay-failure) and an issue template that asks for the log lines. Files: signal_cc/ports.py, signal_cc/adapters/files.py, signal_cc/app/conversation.py, signal_cc/entry/cli.py, signal_cc/entry/hooks.py, signal_cc/entry/wiring.py, tests/test_app.py, tests/test_adapters.py, README.md, .github/ISSUE_TEMPLATE/relay-failure.md. Outside: sending the log anywhere; log rotation.",
+   "acceptance": [
+    "Given a permission prompt answered by a thumbs-up reaction, when ask returns, then relay.log gains one line with kind permission and outcome answered.",
+    "Given a prompt that times out, a stream that ends, or the owner returning to the Mac, when ask returns, then that line's outcome names which.",
+    "Given a handler raises, when entry/cli.py catches it, then relay.log gains an error line with the handler and exception type, and the hook still exits 0 with no output.",
+    "Given a test sends a message with known text to a known owner number, when relay.log is read, then neither the text nor the number appears in it.",
+    "Given the repo, when gh label list runs, then relay-failure exists, and .github/ISSUE_TEMPLATE/relay-failure.md asks for the relay.log lines.",
+    "Given the head, when tests/test_architecture.py runs, then the new port and adapter keep every import pointing inward."
+   ],
+   "prs": [],
+   "domain": "complicated: a new port and file adapter in the existing pattern, called at each prompt end; the rule that the log holds no message text or numbers is a privacy contract",
+   "in_doubt": false,
+   "class": "fixed-date",
+   "after": [
+    "land-status-ci"
+   ],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T16:36:34.543893+00:00",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#3 (e303348) on owner OK. Gates at b2c4f84: arch PASS and quality PASS after fix round 1 (5e1a578, carried through the merge of main), security PASS. CI green on the PR; relay-failure label and issue template in place."
+  },
+  {
+   "id": "plan-approval",
+   "title": "Relay plan approval (ExitPlanMode) to Signal",
+   "goal": "G-2",
+   "repo": "taoq-ai/signal-plugin-cc",
+   "tier": "smart",
+   "framework": "wsjf",
+   "scores": {
+    "value": 8,
+    "time": 5,
+    "risk": 5,
+    "size": 5
+   },
+   "score": 3.6,
+   "why": "G-2 follow-up and a trust-boundary change, so it carries spec artifacts and a probe-first step; lands after land-status-ci.",
+   "promise": "Plan approval (ExitPlanMode) reaches Signal while the owner is away. The relay sends the plan (cut past a limit, with its full length noted) and a poll: approve and keep asking for each edit; approve and auto-accept edits; keep planning. A thumbs-up approves with edits still asked; a thumbs-down or n keeps planning; any other reply keeps planning with the reply as feedback. Approval without a choice keeps per-edit prompts. README's Security section says what is now relayed. First step, before building: a throwaway PermissionRequest hook in a scratch folder records what Claude Code does after allow, with and without a mode change, and the spec cites it. Files: signal_cc/domain/forms.py, signal_cc/domain/texts.py, signal_cc/entry/hooks.py, tests/test_domain.py, tests/test_app.py, tests/test_adapters.py, README.md, and the spec engine's artifacts. Outside: anything while the owner is at the Mac; bypass-permissions mode.",
+   "acceptance": [
+    "Given a session in plan mode calls ExitPlanMode while the owner is away, when the PermissionRequest hook runs, then Signal gets the plan with its tag and a poll of the three choices.",
+    "Given the owner votes the first choice or reacts thumbs-up, when the hook returns, then the session leaves plan mode and later edits still ask for permission.",
+    "Given the owner votes auto-accept, when the hook returns, then the session's mode is the accept-edits mode the probe recorded.",
+    "Given the owner replies 'add a migration step' quoting the plan, when the hook returns, then the decision denies with that text as feedback and the session keeps planning.",
+    "Given a plan longer than the limit, when it is sent, then the text is cut with the total length noted and the poll still arrives.",
+    "Given the owner is at the Mac, when ExitPlanMode is called, then nothing is sent to Signal."
+   ],
+   "prs": [],
+   "domain": "complex: it lifts a refusal the README promises (Security: plan approval stays on the Mac), and which permission mode Claude Code takes after a hook allows ExitPlanMode shows only once built",
+   "in_doubt": false,
+   "class": "standard",
+   "after": [
+    "land-status-ci"
+   ],
+   "host": "agent",
+   "status": "done",
+   "added": "2026-10-29",
+   "approved": true,
+   "changed": "2026-10-29T17:01:42.453303+00:00",
+   "kind": "run",
+   "reason": "Merged as taoq-ai/signal-plugin-cc#5 (9947c90) on owner OK; breaking: confirmed at 68abb48, v0.3.0, announced in #5. Gates: quality and security PASS (b1b08a1), arch PASS (7023693), quality delta PASS (9ecde32). Probe on Claude Code 2.1.311 recorded on the item. CI green on all three legs, 68 tests."
+  }
+ ]
+}

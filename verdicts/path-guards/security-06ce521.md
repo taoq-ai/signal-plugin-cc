@@ -1,0 +1,36 @@
+Verdict: PASS
+Gate: security
+Item: path-guards
+PR: taoq-ai/signal-plugin-cc#11
+Head: 06ce5218a734e4f0e118824d2a22be9cd281b136
+Confidence: high
+
+## Findings
+- [low] PR-body:0 blocks: no. The body says a symlinked listeners/ raises ELOOP. On macOS, O_DIRECTORY|O_NOFOLLOW on a symlink gives ENOTDIR (Errno 20), as the probe shows. The guard holds either way, because remove() lets through only FileNotFoundError. The body also cites /usr/share as a foreign home that is now refused, but /usr/share has no config.json, so Config.load returns None before the check runs.
+- [low] signal_cc/entry/cli.py:35 blocks: no. Existing wording, carried from config-perms note 5: a symlinked listeners/ (ENOTDIR) and an over-long plain-token id (ENAMETOOLONG on listen) both reach stderr as "signal-cli daemon on port N: ...". That names the wrong cause. The exit is still 0, stdout is empty, and nothing is written.
+- [low] signal_cc/entry/hooks.py:29 blocks: no. Length is not bounded. A plain token of 255, 300 or 100000 characters passes the check, and listen then fails with ENAMETOOLONG. No path escape is possible because the alphabet has no separator or dot. A length cap such as {1,128} would turn this into a clean Refused.
+- [low] signal_cc/adapters/files.py:41 blocks: no. Existing gap, outside the promise: FileRegistry.release and the expired-claim sweep in claim() unlink pending/<tag> by path, not through a no-follow folder fd. The ownership of pending/ and listeners/ is not checked either, only whether they are symlinks. Reaching this needs write access to a 0700 home the user owns, or a folder another account planted while the home was still loose. That account would also have to hold an fd open across the tightening. This is the same actor the config-perms verdict accepted.
+- [low] blocks: no. Secret, dependency and static-analysis scans are unmeasured. CI (tests.yml) runs only unittest, and gitleaks, trufflehog, bandit, semgrep, pip-audit and detect-secrets are not installed. A grep of the added lines for token, secret, password, api key and phone-number patterns found nothing.
+
+## Probes
+- Head: `git ls-remote origin fix/path-guards` and `gh pr view 11` both give 06ce521 (draft). Read: `wuwei plan show path-guards`, `git diff origin/main...06ce521` (6 files, +152/-5), the PR body, and the earlier verdicts land-status-ci/security-a3f918a and config-perms/security-b8c3163.
+- Tests on a `git archive 06ce521` copy: `python3 -m unittest discover -s tests` ran 91 tests, OK (Python 3.14.5). Only temporary homes and stub ports were used. ~/.config/signal-plugin-cc, port 8299 and Signal were not touched.
+- Hook-level probe (scratchpad security-path-guards/probe/probe.py, `python3 -I`): 147/147 pass at head. Each case runs relay.py as a subprocess in a fresh temp root, with the away switch on and a local stub daemon on an ephemeral port. Each case diffs the whole root (home plus outside/ plus a planted root/escape.pid), checks the exit code, stdout, stderr and stub calls, and reads the relay.log entry.
+- Unsafe session ids, 30 of them, each through listen, quiet, permission and question (120 runs). The ids: ../../escape, ../escape, .., ., the empty string, a/b, an absolute path to an existing outside file, None, 7, a list, a dict, True, s1\0, \0, s1\n, leading and trailing spaces, %2e%2e%2fescape, ..%2Fescape, s1.pid, Cyrillic а, fullwidth ｓ１, a zero-width space, Arabic-Indic ٣, Kelvin K, dotless ı, \..\escape, ~ and $HOME. Every run gave exit 0, an empty stdout and one stderr line. Nothing changed outside home/relay.log, and 0 sends were made. The journal entry had error=Refused and no session field.
+- Known positive: the same probe at base 86d57a1 passes 10/147. At base, listen with ../../escape overwrote root/escape.pid. Quiet and listen with an absolute id deleted or overwrote outside/kept.pid. Quiet through a symlinked listeners/ deleted the outside pid file and SIGTERMed a live relay.py-named process.
+- Real UUID: quiet removes listeners/<uuid>.pid; permission reaches the stub daemon and the journal records the UUID; listen sends, then clears its pid file. A missing session_id is still "unknown" and accepted.
+- Long plain-token ids (255, 300 and 100000 characters) on listen and quiet: exit 0, empty stdout, nothing written outside the home (see the note).
+- Foreign home, faked by a wrapper that patches os.getuid to return the real uid plus 1, so no root was needed: start, permission, question, listen, quiet and desk each gave exit 0, an empty stdout and one stderr line containing "another account". The tree was byte-identical, the 0755 mode was kept and 0 sends were made. A faked root run (getuid 0) against the user's home behaved the same. I accept the PR's assumption that a root run is refused.
+- Symlinked home pointing at a target that only stat-with-follow reports as foreign: start, permission, listen, quiet and desk are all refused, and the tree is unchanged. So the check reads the target, not the link.
+- Symlinked listeners/ pointing at outside/, which holds <uuid>.pid with the pid of a live relay.py-named process: quiet on UserPromptSubmit, quiet on SessionEnd, and listen all exit 0 with an empty stdout and ENOTDIR on stderr. The outside file was kept, and the process was still alive, because clear() raises before processes.stop. I accept the PR's assumption that Listeners.get still reads through the link, since nothing is signalled.
+- Check-then-open with a home the user owns: under umask 000, a 0777 home is tightened to 0700 by cli.main before any handler writes. After that, only the uid or root can swap pending/ or listeners/. remove() unlinks relative to a folder fd opened with O_NOFOLLOW, so its own unlink has no swap window. The first-write paths keep the config-perms guards (folder() symlink check, then O_NOFOLLOW|O_EXCL opens).
+- Mutants, each in a fresh archive copy, all killed. Making the id check `if False` gives 18 failures. Using re.match instead of fullmatch gives 3. Using a unicode [\w-] class gives 1. Dropping the uid check gives 8. Dropping O_NOFOLLOW in remove() gives 1 error. Reverting clear() to Path.unlink gives 1 error. Dropping the wiring.home call in cli gives 6. Disabling the Refused branch gives 6.
+- Supply chain: no dependency, lockfile, workflow or install-script change. hooks.py adds only `re` from the stdlib.
+- Confidence high: every handler was run end to end at both the head and the base, with positive and negative cases, and each new guard fails tests when mutated. The foreign owner is faked rather than a real second account, but the fake sits at the exact comparison the guard makes.
+- closed: land-status-ci security-a3f918a note 4 (session_id becomes a pidfile path, CWE-22) at 06ce521
+- closed: config-perms security-b8c3163 note 1 (a foreign-owned home is used as is, CWE-59/CWE-367) at 06ce521
+- closed: config-perms security-b8c3163 note 2 (Listeners.clear deletes through a symlinked listeners/, CWE-59) at 06ce521
+- closed: config-perms security-b8c3163 note 3 (session_id traversal and absolute ids) at 06ce521
+
+## Residual risk
+Subfolder ownership and the pending/ unlinks are still unguarded against an actor who already had write access to the home. The stderr wording for OSError still misnames the cause. Scanners are unmeasured.
