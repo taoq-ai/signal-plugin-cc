@@ -52,7 +52,10 @@ def quiet(cfg, hook):
 
 def listen(cfg, hook):
     """Stop, in the background with asyncRewake: once the owner is away, send Claude's last message and
-    wake the session with the reply by exiting 2 with it on stderr."""
+    wake the session with the reply by exiting 2 with it on stderr. A headless run (claude -p) waits for
+    this hook, and nobody can continue it, so there it returns at once."""
+    if processes.headless():
+        return None
     quiet(cfg, hook)  # replace the listener of the session's previous turn
     listeners, session = wiring.listeners(cfg), session_id(hook)
     listeners.set(session, os.getpid())

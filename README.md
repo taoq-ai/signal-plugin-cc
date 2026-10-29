@@ -27,6 +27,12 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
 In a meeting at the Mac? Send `away`: prompts then go to Signal whatever the idle time, and touching the Mac
 doesn't hand them back. Send `back`, or type a prompt at the Mac, to let idle time decide again.
 
+## Requirements
+
+macOS, with Python 3.9 or later (the system `python3` will do). Linux works without idle detection (see
+[Limits](#limits)); Windows is not supported, and there the hooks do nothing. In a headless run (`claude -p`)
+a finished turn is not sent, because nobody can continue it; permission prompts and questions still are.
+
 ## Setup
 
 1. Install signal-cli (it brings Java) and qrencode:

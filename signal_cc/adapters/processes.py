@@ -14,6 +14,24 @@ def is_relay(pid):
     return pid != os.getpid() and "relay.py" in cmd
 
 
+def headless():
+    """True in a print-mode run (claude -p), which waits for its Stop hook to end. Claude Code's own
+    arguments decide: CLAUDE_CODE_ENTRYPOINT is sdk-cli there, but a claude -p started from another
+    session inherits that session's value. Print mode with streaming input (an SDK host) is not headless."""
+    pid, cmd = os.environ.get("CLAUDE_PID", ""), ""
+    if pid.isdigit():  # one process: ps reads a list such as 1,2 as several
+        try:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", pid], capture_output=True, text=True).stdout
+        except OSError:  # no ps
+            pass
+    if not cmd:
+        return os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "sdk-cli"
+    args = cmd.split()
+    streaming = "--input-format=stream-json" in args or any(
+        a == "--input-format" and b == "stream-json" for a, b in zip(args, args[1:]))
+    return bool({"-p", "--print"} & set(args)) and not streaming
+
+
 def stop(pid):
     if pid and is_relay(pid):
         os.kill(pid, signal.SIGTERM)
