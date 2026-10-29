@@ -15,11 +15,14 @@ NO = {"n", "no", "deny", "\N{THUMBS DOWN SIGN}"}
 SKIN_TONES = re.compile("[\U0001F3FB-\U0001F3FF️]")  # 👍🏽 counts as 👍
 
 
+def word(text):
+    return SKIN_TONES.sub("", text).lower()
+
+
 def decide(text):
-    word = SKIN_TONES.sub("", text).lower()
-    if word in YES:
+    if word(text) in YES:
         return {"behavior": "allow"}
-    reason = "" if word in NO else f": {text}"
+    reason = "" if word(text) in NO else f": {text}"
     return {"behavior": "deny", "message": f"Denied from Signal{reason}"}
 
 
@@ -94,6 +97,50 @@ class QuestionForm:
 
     def receipt(self, answers):
         return "; ".join(f"{q} \N{RIGHTWARDS ARROW} {a}" for q, a in answers.items())
+
+
+class PlanForm:
+    """Approve a plan (ExitPlanMode) or keep planning: a poll of three choices, a 👍 or 👎 reaction, y, n, or
+    feedback that keeps planning. Approval without a choice keeps the per-edit prompts."""
+    kind = "plan"
+    LIMIT = 1500
+    CHOICES = ("Approve, ask before each edit", "Approve, auto-accept edits", "Keep planning")
+    KEEP = "Keep planning (from Signal)"
+
+    def __init__(self, tool_input, project):
+        self.tool_input = tool_input
+        plan = (tool_input.get("plan") or "").strip()
+        if len(plan) > self.LIMIT:
+            plan = f"{plan[:self.LIMIT]}\N{HORIZONTAL ELLIPSIS}\n(first {self.LIMIT} of {len(plan)} characters)"
+        self.text = (f"Plan from {project}:\n{plan}\n\nVote below, or react \N{THUMBS UP SIGN} to approve with edits "
+                     "still asked; \N{THUMBS DOWN SIGN}, n or what to change keeps planning.")
+        self.polls = [Poll("Approve this plan?", list(self.CHOICES), False)]
+
+    def _approve(self, auto=False):
+        # Claude Code 2.1.311 ignores an allow for ExitPlanMode without updatedInput; setMode picks the next mode.
+        decision = {"behavior": "allow", "updatedInput": self.tool_input}
+        if auto:
+            decision["updatedPermissions"] = [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]
+        return decision
+
+    def parse(self, reply, target):
+        if reply.votes is not None:
+            if len(reply.votes) != 1 or reply.votes[0] not in range(len(self.CHOICES)):
+                return None
+            choice = reply.votes[0]
+            return self._approve(auto=choice == 1) if choice < 2 else {"behavior": "deny", "message": self.KEEP}
+        if not reply.text:
+            return None
+        if word(reply.text) in YES:
+            return self._approve()
+        if word(reply.text) in NO:
+            return {"behavior": "deny", "message": self.KEEP}
+        return {"behavior": "deny", "message": f"Keep planning. The owner replied from Signal: {reply.text}"}
+
+    def receipt(self, decision):
+        if decision["behavior"] == "deny":
+            return "Keep planning" if decision["message"] == self.KEEP else decision["message"]
+        return "Approved; edits are auto-accepted" if "updatedPermissions" in decision else "Approved; edits still ask"
 
 
 class ContinueForm:

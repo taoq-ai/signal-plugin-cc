@@ -16,6 +16,10 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
 - **Questions (AskUserQuestion):** the bot sends the questions with their options, plus a poll per question.
   Tap the poll, quote a question's poll with an option number, its label or your own answer, or reply one line
   per open question. Answers can come in any order; after the last one you get a ✓ receipt and the polls close.
+- **Plan approval (ExitPlanMode):** the bot sends the plan (the first 1500 characters of a longer one, with its
+  length) and a poll: approve and keep asking before each edit, approve and auto-accept edits, or keep planning.
+  React 👍 or reply `y` to approve with edits still asked; react 👎 or reply `n` to keep planning, or reply what to
+  change and Claude keeps planning with your reply as feedback.
 - **Conversation:** when a session finishes a turn while you're away, its last message comes to Signal. Reply
   (quote it if several sessions wrote) and the session wakes with your reply as its next instruction, then
   answers you the same way. Typing at the Mac or closing the session stops it listening, and Signal gets a short
@@ -81,7 +85,7 @@ a finished turn is not sent, because nobody can continue it; permission prompts 
 
    ```
    /plugin marketplace add taoq-ai/signal-plugin-cc
-   /plugin install signal@signal-plugin-cc
+   /plugin install signal-relay@signal-plugin-cc
    ```
 
 5. Start a new session. It starts the signal-cli daemon if it isn't running (log in
@@ -99,8 +103,13 @@ lists the waiting prompts.
 
 ## Security
 
-Anyone who can send messages as `owner` can approve tool calls in your sessions. Keep registration lock on
-for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; it stays on the Mac.
+Anyone who can send messages as `owner` can approve tool calls and plans in your sessions. Keep registration
+lock on for your number (and the bot's).
+
+Up to 0.2.0, plan approval (ExitPlanMode) was never relayed and stayed on the Mac. Since 0.3.0 plans are relayed
+while you're away: their text goes to Signal, and a vote for "auto-accept edits" puts that session in
+accept-edits mode, so its file edits stop asking. Every other approval from Signal keeps the per-edit prompts.
+There is no setting to keep plans on the Mac only.
 
 ## Limits
 
@@ -116,7 +125,7 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 
 Each prompt sent to Signal adds one JSON line to `relay.log` in the config home (`$SIGNAL_CC_HOME` when set,
 otherwise `~/.config/signal-plugin-cc`) when it ends. A prompt line has the keys `time`, `kind` (`permission`,
-`question`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
+`question`, `plan`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
 
 - `answered`, `timed out`, `back at the Mac` or `stream ended`;
 - `answered at the Mac` or `session closed`: a finished session's message was waiting on Signal when you typed
