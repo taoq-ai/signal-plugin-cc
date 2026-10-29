@@ -123,7 +123,7 @@ class Listeners:
     def clear(self, session, pid=None):
         """Forget the session's listener; with pid, only if it is still that one."""
         if pid is None or self.get(session) == pid:
-            self._path(session).unlink(missing_ok=True)
+            private.remove(self._path(session))
 
 
 class DeskLock:
