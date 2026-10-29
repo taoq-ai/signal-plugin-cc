@@ -21,7 +21,7 @@ from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegi
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
-from signal_cc.entry import hooks
+from signal_cc.entry import cli, hooks
 
 
 class Base(unittest.TestCase):
@@ -500,6 +500,112 @@ class PrivateHomeTest(Base):
                                  input="{}", capture_output=True, text=True)
             self.assertEqual((run.returncode, run.stdout, target.read_text()), (0, "", "kept"))
             self.assertIn("relay.log", run.stderr)
+
+
+class PathGuardTest(Base):
+    """A session id never leaves the home, a home another account owns is never used, and quiet never
+    deletes through a symlinked listeners/ folder. Each refusal is one stderr line, an exit 0, no output."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.home / "home"
+        self.outside = Path(self.tmp.name) / "outside"
+        self.home.mkdir(mode=0o700)
+        self.outside.mkdir()
+        (self.home / "config.json").write_text(json.dumps({"owner": OWNER, "port": self.server.server_port,
+                                                                   "wait": 1, "listen": 1}))  # bounded if a guard fails
+        os.environ["SIGNAL_CC_HOME"] = str(self.home)
+
+    def run_hook(self, handler, hook):
+        """cli.main in process, as relay.py runs it: (stdout, stderr lines)."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(hook))), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), mock.patch.object(processes, "headless", return_value=False), \
+                mock.patch.object(processes.subprocess, "Popen") as spawned, \
+                mock.patch.object(signal_cli.subprocess, "Popen") as started:
+            cli.main(["relay.py", handler])
+        self.assertEqual((spawned.called, started.called), (False, False))
+        return out.getvalue(), err.getvalue().splitlines()
+
+    def tree(self, root):
+        return {str(p.relative_to(root)): (p.is_symlink() or p.is_dir() or p.read_text())
+                for p in root.rglob("*")}
+
+    def test_a_session_id_that_is_not_a_plain_token_is_refused(self):
+        for good in ("s1", "unknown", "0b6f2c1e-6a1d-4c1e-9f2a-3d4e5f6a7b8c", "a_B-9"):
+            self.assertEqual(hooks.session_id({"session_id": good}), good)
+        self.assertEqual(hooks.session_id({}), "unknown")
+        for bad in ("", ".", "..", "a/b", "a.b", "s1\n", "../../escape", "/abs", "\u00e9", 7, None):
+            with self.subTest(bad=bad), self.assertRaises(hooks.Refused):
+                hooks.session_id({"session_id": bad})
+
+    def test_listen_and_quiet_never_touch_a_file_outside_the_home(self):
+        (self.outside / "kept.pid").write_text("kept")
+        (self.home.parent / "escape.pid").write_text("kept")  # what home/listeners/../../escape.pid names
+        before = self.tree(Path(self.tmp.name))
+        for handler in ("listen", "quiet"):
+            for session in ("../../escape", str(self.outside / "kept"), str(self.outside / "new")):
+                with self.subTest(handler=handler, session=session):
+                    out, err = self.run_hook(handler, {"session_id": session, "hook_event_name": "SessionEnd",
+                                                       "cwd": "/x/proj", "last_assistant_message": "Done."})
+                    self.assertEqual((out, len(err)), ("", 1))
+                    self.assertIn("session_id", err[0])
+                    after = self.tree(Path(self.tmp.name))
+                    self.assertEqual({k: v for k, v in after.items() if k != "home/relay.log"}, before)
+        self.assertEqual(StubDaemon.calls, [])
+        errors = {json.loads(line)["error"] for line in (self.home / "relay.log").read_text().splitlines()}
+        self.assertEqual(errors, {"Refused"})  # the journal, in the home, records the type only
+
+    def foreign(self):
+        """The home's stat as if another account owned it (Path.stat: 3.9's pathlib binds os.stat early)."""
+        real, home = Path.stat, self.home
+
+        def stat(path, *args, **kwargs):
+            st = real(path, *args, **kwargs)
+            if path == home:
+                st = os.stat_result((*st[:4], st.st_uid + 1, *st[5:10]))
+            return st
+        return mock.patch.object(Path, "stat", stat)
+
+    def test_a_home_another_account_owns_is_refused_by_every_hook(self):
+        os.chmod(self.home, 0o755)
+        (self.home / "away").write_text("")
+        (self.home / "listeners").mkdir()
+        (self.home / "listeners" / "s1.pid").write_text("1")
+        before = self.tree(self.home)
+        for handler in ("start", "permission", "question", "listen", "quiet", "desk"):
+            StubDaemon.events.put(None)  # if the guard fails, the desk's event stream ends at once
+            with self.subTest(handler=handler), self.foreign():
+                out, err = self.run_hook(handler, {"session_id": "s1", "hook_event_name": "UserPromptSubmit",
+                                                   "prompt": "hi", "tool_name": "Bash", "tool_input": {}})
+                self.assertEqual((out, len(err)), ("", 1))
+                self.assertIn("another account", err[0])
+                self.assertEqual(self.tree(self.home), before)
+                self.assertEqual(stat.S_IMODE(self.home.stat().st_mode), 0o755)  # not tightened either
+        self.assertEqual(StubDaemon.calls, [])
+
+    def test_private_home_refuses_a_foreign_owner(self):
+        with self.foreign(), self.assertRaises(PermissionError):
+            private.home(self.home)
+
+    def test_quiet_never_deletes_through_a_symlinked_listeners_folder(self):
+        (self.outside / "s1.pid").write_text("kept")
+        (self.home / "listeners").symlink_to(self.outside)
+        out, err = self.run_hook("quiet", {"session_id": "s1", "hook_event_name": "SessionEnd"})
+        self.assertEqual((out, len(err), (self.outside / "s1.pid").read_text()), ("", 1, "kept"))
+        with self.assertRaises(OSError):
+            Listeners(self.home).clear("s1")
+        self.assertEqual((self.outside / "s1.pid").read_text(), "kept")
+
+    def test_clear_still_removes_a_real_pid_file_and_a_missing_one_is_fine(self):
+        listeners = Listeners(self.home)
+        listeners.clear("s1")  # no listeners/ yet
+        listeners.set("s1", 123)
+        listeners.clear("s1", 999)  # another listener's: kept
+        self.assertEqual(listeners.get("s1"), 123)
+        listeners.clear("s1")
+        listeners.clear("s1")
+        self.assertIsNone(listeners.get("s1"))
 
 
 class ConfigTest(unittest.TestCase):

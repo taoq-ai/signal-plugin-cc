@@ -1,6 +1,7 @@
 """The Claude Code hook handlers. Each takes the config and the hook's input and returns the hook's output
 or None; None lets Claude Code go on as it would without the plugin."""
 import os
+import re
 import sys
 import time
 
@@ -18,8 +19,16 @@ def project(hook):
     return os.path.basename(hook.get("cwd", "")) or "Claude Code"
 
 
+class Refused(ValueError):
+    """Hook input the relay will not act on."""
+
+
 def session_id(hook):
-    return hook.get("session_id", "unknown")
+    """The session id, a file name under the home, so a plain token only (Claude Code sends a UUID)."""
+    session = hook.get("session_id", "unknown")
+    if not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", session):
+        raise Refused(f"session_id {session!r} is not a plain token, not used")
+    return session
 
 
 def permission(cfg, hook):

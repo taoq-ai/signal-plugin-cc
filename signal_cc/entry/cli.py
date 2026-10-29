@@ -21,8 +21,17 @@ def main(argv=sys.argv):
     if not cfg:
         return  # not set up: stay out of the way
     try:
+        wiring.home(cfg)
+    except OSError as e:  # nothing may be written there, the log included
+        print(f"signal-plugin-cc: {e}", file=sys.stderr)
+        return
+    try:
         data = sys.stdin.read()  # the desk runs with no hook input
         out = HANDLERS[argv[1]](cfg, json.loads(data) if data.strip() else {})
+    except hooks.Refused as e:
+        print(f"signal-plugin-cc: {e}", file=sys.stderr)
+        failed(cfg, argv, e)
+        return
     except OSError as e:
         print(f"signal-plugin-cc: signal-cli daemon on port {cfg.port}: {e}", file=sys.stderr)
         failed(cfg, argv, e)
