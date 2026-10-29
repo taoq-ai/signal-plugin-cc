@@ -8,13 +8,17 @@ import time
 from ..domain.model import Waiting
 from . import private
 
+KEEP = 86400  # seconds a session keeps its messages without a new one, so a crashed session frees its tags
+
 
 class FileRegistry:
-    """Registry: one file per waiting prompt under pending/, and the latest tag in last."""
+    """Registry: one file per waiting prompt under pending/, the latest tag in last, and under threads/ one file
+    per session with a line "tag timestamp" for each message it keeps."""
 
     def __init__(self, home):
         self.home = home
         self.pending = home / "pending"
+        self.kept = home / "threads"
 
     def claim(self, summary, ttl):
         """The claim exists before the prompt is sent, so no other session takes a plain reply to it."""
@@ -27,8 +31,17 @@ class FileRegistry:
                     p.unlink(missing_ok=True)
             except (OSError, ValueError, KeyError):
                 pass
+        for p in self.kept.iterdir() if self.kept.is_dir() else ():  # sessions that ended without forgetting
+            try:
+                if p.stat().st_mtime < now - KEEP:
+                    private.remove(p)
+            except OSError:
+                pass
+        kept = {tag for messages in self.threads().values() for tag, _ in messages}
         while True:
             tag = secrets.token_hex(2)
+            if tag in kept:  # a session's earlier message still takes replies by it
+                continue
             try:
                 with private.open_file(self.pending / tag, "x") as f:
                     json.dump({"created": now, "deadline": now + ttl, "summary": summary}, f)
@@ -63,6 +76,32 @@ class FileRegistry:
         private.home(self.home)
         with private.open_file(self.home / "last", "w") as f:
             f.write(tag)
+
+    def keep(self, session, tag, ts):
+        private.home(self.home)
+        private.folder(self.kept)
+        with private.open_file(self.kept / session, "a") as f:
+            f.write(f"{tag} {ts}\n")  # one short append: the session's next listener may read it at once
+
+    def threads(self):
+        out = {}
+        for p in self.kept.iterdir() if self.kept.is_dir() else ():
+            try:
+                lines = p.read_text().splitlines()
+            except OSError:
+                continue
+            messages = []
+            for line in lines:
+                try:
+                    tag, ts = line.split()
+                    messages.append((tag, int(ts)))
+                except ValueError:
+                    continue  # a line cut short
+            out[p.name] = messages
+        return out
+
+    def forget(self, session):
+        private.remove(self.kept / session)
 
 
 class AwaySwitch:

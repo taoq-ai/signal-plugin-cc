@@ -217,6 +217,53 @@ class ContinueTest(unittest.TestCase):
         self.assertEqual(m.sent, [])
 
 
+class ThreadTest(unittest.TestCase):
+    """A session keeps the messages its finished turns sent, so a reply to an earlier one still reaches it once a
+    later turn's listener took over; it never reaches another session."""
+
+    def setUp(self):
+        conversation.SETTLE, conversation.POLL = 0.3, 0.05
+
+    def test_a_reply_quoting_an_earlier_turn_reaches_the_current_listener(self):
+        registry = FakeRegistry()
+        registry.keep("s1", "0abc", 900)  # the earlier turn's message, its listener since replaced
+        m = FakeMessenger(lambda t, ts: Reply("go on", 900))
+        self.assertEqual(continue_session(conv(m, registry), ContinueForm("Second.", "proj"), grace=5, wait=10),
+                         "go on")
+        self.assertEqual(registry.threads(), {"s1": [("0abc", 900), ("0001", 1001)]})  # kept for the next turn
+
+    def test_a_reply_tagged_for_an_earlier_turn_reaches_the_current_listener(self):
+        registry = FakeRegistry(Waiting(0, OTHER, "Bash in other:"))  # so a plain reply would only get a hint
+        registry.keep("s1", "0abc", 900)
+        m = FakeMessenger(plain("[0abc] go on"))
+        self.assertEqual(continue_session(conv(m, registry), ContinueForm("Second.", "proj"), grace=5, wait=10),
+                         "go on")
+
+    def test_another_sessions_earlier_messages_never_reach_this_one(self):
+        for name, reply in [("quoted", Reply("y", 900)), ("tagged", Reply("0abc y"))]:
+            with self.subTest(reply=name):
+                registry = FakeRegistry()
+                registry.keep("s2", "0abc", 900)
+                m = FakeMessenger(lambda t, ts: reply)  # alone and latest: a plain reply would be taken
+                self.assertIsNone(continue_session(conv(m, registry, wait=0.5), ContinueForm("Done.", "proj"),
+                                                   grace=5, wait=0.5))
+                self.assertIsNone(conv(FakeMessenger(lambda t, ts: reply), registry, wait=0.5).ask(BASH))
+
+    def test_a_prompt_in_a_turn_takes_no_reply_to_an_earlier_turn(self):
+        registry = FakeRegistry()
+        registry.keep("s1", "0abc", 900)
+        m = FakeMessenger(lambda t, ts: Reply("y", 900))
+        self.assertIsNone(conv(m, registry, wait=0.5).ask(BASH))
+        self.assertEqual(registry.threads(), {"s1": [("0abc", 900)]})  # nor is the prompt kept
+
+    def test_a_message_that_cannot_be_kept_still_takes_its_reply(self):
+        registry = FakeRegistry()
+        registry.keep = lambda *a: (_ for _ in ()).throw(PermissionError("threads"))
+        m = FakeMessenger(quoting("go on"))
+        self.assertEqual(continue_session(conv(m, registry), ContinueForm("Done.", "proj"), grace=5, wait=10),
+                         "go on")
+
+
 class StoppedTest(unittest.TestCase):
     """hooks.quiet stops a waiting listener; the listener tells Signal when the Mac took over."""
 

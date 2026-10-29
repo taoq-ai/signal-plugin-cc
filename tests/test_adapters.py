@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import queue
 import signal
 import stat
 import subprocess
@@ -22,6 +23,14 @@ from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
 from signal_cc.entry import cli, hooks
+
+
+# A background agent's report, as Claude Code submits it to start a turn of its own (UserPromptSubmit's prompt)
+TASK_DONE = ("<task-notification>\n<task-id>a1b2c3d4e5f6a7b8c</task-id>\n<tool-use-id>toolu_01AbCdEfGhIjKlMnOpQrStUv"
+             "</tool-use-id>\n<output-file>/private/tmp/claude-501/tasks/a1b2c3d4e5f6a7b8c.output</output-file>\n"
+             "<status>completed</status>\n<summary>Agent \"Build the fix\" finished</summary>\n<result>Opened PR #12."
+             "</result>\n<usage><subagent_tokens>51234</subagent_tokens><tool_uses>42</tool_uses>"
+             "<duration_ms>812345</duration_ms></usage>\n</task-notification>")
 
 
 class Base(unittest.TestCase):
@@ -116,6 +125,30 @@ class FilesTest(Base):
         registry.release("aaaa")
         registry.mark_latest("bbbb")
         self.assertEqual(([w.tag for w in registry.waiting()], registry.latest()), (["bbbb"], "bbbb"))
+
+    def test_a_session_keeps_its_earlier_messages_until_forgotten_and_no_claim_takes_their_tags(self):
+        registry = FileRegistry(self.home)
+        registry.keep("s1", "aaaa", 1001)
+        registry.keep("s1", "bbbb", 1005)
+        registry.keep("s2", "cccc", 1007)
+        self.assertEqual(registry.threads(), {"s1": [("aaaa", 1001), ("bbbb", 1005)], "s2": [("cccc", 1007)]})
+        drawn = iter(["aaaa", "cccc", "dddd"])
+        with mock.patch.object(files.secrets, "token_hex", lambda n: next(drawn)):
+            self.assertEqual(registry.claim("x", 60), "dddd")
+        registry.forget("s1")
+        registry.forget("s3")  # never kept anything
+        self.assertEqual(registry.threads(), {"s2": [("cccc", 1007)]})
+
+    def test_a_thread_left_for_a_day_is_dropped_and_a_damaged_line_skipped(self):
+        registry = FileRegistry(self.home)
+        registry.keep("s1", "aaaa", 1001)
+        with (self.home / "threads" / "s1").open("a") as f:
+            f.write("not a message\n")
+        registry.keep("s2", "bbbb", 1002)
+        day_ago = time.time() - files.KEEP - 1
+        os.utime(self.home / "threads" / "s2", (day_ago, day_ago))
+        registry.claim("x", 60)  # cleans up, as for expired claims
+        self.assertEqual(registry.threads(), {"s1": [("aaaa", 1001)]})
 
     def test_the_journal_appends_one_timed_json_line_per_entry(self):
         journal = FileJournal(self.home / "new")  # the home may not exist yet
@@ -323,7 +356,10 @@ class HooksTest(Base):
                  "print('ready', flush=True)\ntime.sleep(30)")
         cases = [({"hook_event_name": "UserPromptSubmit", "prompt": "run it"}, signal.SIGUSR1),
                  ({"hook_event_name": "SessionEnd"}, signal.SIGUSR2),
-                 ({"hook_event_name": "UserPromptSubmit", "prompt": f"{hooks.WOKEN}\ngo on"}, signal.SIGTERM),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": f"why did\n{TASK_DONE}\nstop?"}, signal.SIGUSR1),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": f"rename WOKEN = \"{hooks.WOKEN}\""},
+                  signal.SIGUSR1),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": None}, signal.SIGUSR1),
                  ({"hook_event_name": "Stop"}, signal.SIGTERM)]
         for hook, expected in cases:
             with self.subTest(hook=hook["hook_event_name"], expected=expected.name):
@@ -337,6 +373,70 @@ class HooksTest(Base):
                     fake.kill()
                     fake.wait()
                     fake.stdout.close()
+
+    def test_a_turn_claude_code_started_leaves_the_listener_and_the_switch_alone(self):
+        catch = ("import signal, sys, time\n"
+                 "for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2):\n"
+                 "    signal.signal(s, lambda n, f: (print(n, flush=True), sys.exit()))\n"
+                 "print('ready', flush=True)\ntime.sleep(30)")
+        wake = f"<task-notification>Stop hook feedback:\n{hooks.WOKEN}\ngo on</task-notification>"
+        switch, registry = AwaySwitch(self.home), FileRegistry(self.home)
+        switch.set(True)
+        registry.keep("s1", "abcd", 1001)
+        for name, prompt in [("background agent", TASK_DONE), ("indented", f"\n {TASK_DONE}\n"),
+                             ("signal wake", wake), ("bare wake", f"{hooks.WOKEN}\ngo on")]:
+            with self.subTest(prompt=name):
+                fake = subprocess.Popen([sys.executable, "-c", catch, "relay.py"], stdout=subprocess.PIPE, text=True)
+                try:
+                    self.assertEqual(fake.stdout.readline().strip(), "ready")
+                    Listeners(self.home).set("s1", fake.pid)
+                    hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1",
+                                           "prompt": prompt})
+                    with self.assertRaises(subprocess.TimeoutExpired):  # no signal landed
+                        fake.wait(timeout=1)
+                    self.assertEqual((Listeners(self.home).get("s1"), switch.on(), registry.threads()),
+                                     (fake.pid, True, {"s1": [("abcd", 1001)]}))
+                finally:
+                    fake.kill()
+                    fake.wait()
+                    fake.stdout.close()
+
+    def test_a_prompt_at_the_mac_or_the_end_of_the_session_forgets_its_earlier_messages(self):
+        registry = FileRegistry(self.home)
+        for hook in ({"hook_event_name": "Stop"}, {"hook_event_name": "UserPromptSubmit", "prompt": "run it"},
+                     {"hook_event_name": "SessionEnd"}):
+            registry.keep("s1", "abcd", 1001)
+            hooks.quiet(self.cfg, {**hook, "session_id": "s1"})
+            with self.subTest(hook=hook["hook_event_name"]):
+                self.assertEqual("s1" in registry.threads(), hook["hook_event_name"] == "Stop")
+
+    def test_a_reply_to_an_earlier_turn_wakes_the_session_after_a_later_turn_took_over(self):
+        sigs = (signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2)
+        before = {sig: signal.getsignal(sig) for sig in sigs}
+        self.addCleanup(lambda: [signal.signal(sig, handler) for sig, handler in before.items()])
+        self.cfg = replace(self.cfg, listen=5)  # a reply that never routes ends the wait soon
+        stop = {"session_id": "s1", "cwd": "/x/proj", "hook_event_name": "Stop"}
+        threading.Timer(1.0, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()  # what the next Stop sends it
+        with self.assertRaises(SystemExit):
+            hooks.listen(self.cfg, {**stop, "last_assistant_message": "Started the agent."})
+        [(first, _)] = [(1000 + i + 1, c) for i, c in enumerate(StubDaemon.calls) if c[0] == "send"]
+        ended, StubDaemon.events = StubDaemon.events, queue.Queue()  # the next listener's stream gets the reply
+        ended.put(None)
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": TASK_DONE})
+
+        def quote_the_first_once_the_second_is_out():
+            for _ in range(200):
+                if len([c for c in StubDaemon.calls if c[0] == "send"]) == 2:
+                    StubDaemon.push({"sourceNumber": OWNER, "dataMessage": {"message": "merge it",
+                                                                            "quote": {"id": first}}})
+                    return
+                time.sleep(0.02)
+        threading.Thread(target=quote_the_first_once_the_second_is_out, daemon=True).start()
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as woke, contextlib.redirect_stderr(err):
+            hooks.listen(self.cfg, {**stop, "last_assistant_message": "The agent opened the PR."})
+        self.assertEqual(woke.exception.code, 2)
+        self.assertIn("merge it", err.getvalue())
 
     def test_the_desk_answers_status(self):
         registry = FileRegistry(self.home)
@@ -373,6 +473,10 @@ class HooksTest(Base):
         self.assertTrue(switch.on())
         hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "run it"})
         self.assertFalse(switch.on())
+        switch.set(True)  # a typed prompt that mentions the wake text is still typed
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1",
+                               "prompt": f"rename WOKEN = \"{hooks.WOKEN}\" to WAKE"})
+        self.assertFalse(switch.on())
 
     def test_a_turn_woken_from_signal_leaves_the_switch_on(self):
         switch = AwaySwitch(self.home)
@@ -404,6 +508,7 @@ class PrivateHomeTest(Base):
         FileRegistry(home).mark_latest("abcd")
         AwaySwitch(home).set(True)
         Listeners(home).set("s1", 123)
+        FileRegistry(home).keep("s1", "abcd", 1001)
         lock = DeskLock(home)
         lock.acquire()
         lock.release()
@@ -418,7 +523,7 @@ class PrivateHomeTest(Base):
         self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
         self.assertEqual({p for p in modes}, {"relay.log", "pending", "pending/" + next(home.glob("pending/*")).name,
                                               "last", "away", "listeners", "listeners/s1.pid", "desk.lock",
-                                              "daemon.log"})
+                                              "daemon.log", "threads", "threads/s1"})
         self.assertEqual({p: m for p, m in modes.items() if m != (0o700 if (home / p).is_dir() else 0o600)}, {})
 
     def test_an_existing_home_left_open_is_tightened(self):
@@ -434,8 +539,9 @@ class PrivateHomeTest(Base):
         for name in ("relay.log", "last", "away", "desk.lock", "daemon.log"):
             (outside / name).write_text("kept")
             (home / name).symlink_to(outside / name)
-        (outside / "pending").mkdir()
-        (home / "pending").symlink_to(outside / "pending")
+        for folder in ("pending", "threads"):
+            (outside / folder).mkdir()
+            (home / folder).symlink_to(outside / folder)
         (outside / "listeners").mkdir()
         (outside / "listeners" / "s1.pid").write_text("kept")
         (home / "listeners").mkdir(mode=0o700)
@@ -445,6 +551,7 @@ class PrivateHomeTest(Base):
         self.assertIn("relay.log", err.getvalue())
         writes = [lambda: FileRegistry(home).claim("waiting", 60), lambda: FileRegistry(home).mark_latest("abcd"),
                   lambda: AwaySwitch(home).set(True), lambda: Listeners(home).set("s1", 123),
+                  lambda: FileRegistry(home).keep("s1", "abcd", 1001), lambda: FileRegistry(home).forget("s1"),
                   lambda: DeskLock(home).acquire(), lambda: processes.spawn("desk", home / "daemon.log"),
                   lambda: SignalCli(replace(self.cfg, home=home)).start()]
         with mock.patch.object(processes.subprocess, "Popen") as spawned, \

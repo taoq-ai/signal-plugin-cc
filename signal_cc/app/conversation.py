@@ -25,17 +25,18 @@ class Conversation:
             self.registry.mark_latest(tag)  # before sending, so a fast plain reply finds it
         return self.messenger.send(text)
 
-    def ask(self, form, wait=None, leave_on_return=True):
+    def ask(self, form, wait=None, leave_on_return=True, thread=False):
         """Send the form and its polls; return its answer.
 
         None when the owner is at the Mac, on timeout, when the event stream ends, or (with
-        leave_on_return) when the owner comes back to the Mac.
+        leave_on_return) when the owner comes back to the Mac. With thread (a finished turn's message), a
+        reply to a message the session's earlier turns kept counts too, and the session keeps this one.
         """
         if not self.presence.away():
             return None
         end, started = {"tag": None, "outcome": "error"}, time.time()
         try:
-            return self._ask(form, wait or self.wait, leave_on_return, end)
+            return self._ask(form, wait or self.wait, leave_on_return, end, thread)
         except SystemExit:  # the session's listener was stopped (hooks.quiet): a normal end, not a failure
             if end["outcome"] in ("error", "send failed"):
                 end["outcome"] = "quieted"
@@ -44,15 +45,23 @@ class Conversation:
             self.journal.record({"kind": form.kind, "tag": end["tag"], "session": self.session,
                                  "outcome": end["outcome"], "waited": round(time.time() - started, 1)})
 
-    def _ask(self, form, wait, leave_on_return, end):
+    def _ask(self, form, wait, leave_on_return, end, thread):
         """ask, noting in end the prompt's tag and how it ended."""
         replies, close = self.messenger.subscribe()  # before sending, so no reply is missed
         tag = end["tag"] = self.registry.claim(form.text.splitlines()[0], wait)
-        sent = {}  # timestamp of each message of this prompt -> the poll index it holds, or None
+        earlier = self.registry.threads().get(self.session, []) if thread else []
+        # timestamp of each message of this prompt (and of the session's earlier turns) -> its poll index, or None
+        sent = {ts: None for _, ts in earlier}
         try:
             end["outcome"] = "send failed"
-            sent[self.say(tag, texts.tagged(tag, form.text))] = None
+            ts = self.say(tag, texts.tagged(tag, form.text))
+            sent[ts] = None
             end["outcome"] = "error"  # until _collect names the end
+            if thread:
+                try:
+                    self.registry.keep(self.session, tag, ts)
+                except OSError:
+                    pass  # replies to it still reach this listener, only not a later turn's
             for i, poll in enumerate(form.polls):
                 try:
                     self.registry.mark_latest(tag)
@@ -60,7 +69,8 @@ class Conversation:
                                                   poll.multi)] = i
                 except RuntimeError:
                     break  # the text message still takes replies
-            return self._collect(form, tag, sent, replies, time.time() + wait, leave_on_return, end)
+            return self._collect(form, tag, sent, {t for t, _ in earlier}, replies, time.time() + wait,
+                                 leave_on_return, end)
         except SystemExit as stopped:  # hooks.quiet: tell Signal if the Mac took over a prompt still waiting
             why = getattr(stopped, "why", None)
             if why and sent and end["outcome"] == "error":
@@ -80,7 +90,7 @@ class Conversation:
                         pass
             close()
 
-    def _collect(self, form, tag, sent, replies, deadline, leave_on_return, end):
+    def _collect(self, form, tag, sent, mine, replies, deadline, leave_on_return, end):
         value, settle = None, 0
         while time.time() < deadline:
             if value is not None and time.time() >= settle:
@@ -96,7 +106,8 @@ class Conversation:
             if reply is None:
                 end["outcome"] = "stream ended" if value is None else "answered"
                 return value  # the stream ended
-            where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest())
+            kept = {t for messages in self.registry.threads().values() for t, _ in messages}
+            where = route(reply, tag, sent, self.registry.waiting(), self.registry.latest(), mine, kept)
             if where == HINT:
                 text, hint_tag = texts.hint(self.registry.waiting())
                 self.say(hint_tag, text)
@@ -127,4 +138,4 @@ def continue_session(conversation, form, grace, wait):
         if time.time() > deadline:
             return None
         time.sleep(POLL)
-    return conversation.ask(form, wait=wait, leave_on_return=False)
+    return conversation.ask(form, wait=wait, leave_on_return=False, thread=True)

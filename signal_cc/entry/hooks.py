@@ -13,6 +13,7 @@ from ..domain.model import AT_MAC, CLOSED
 from . import wiring
 
 WOKEN = "The owner replied from Signal, away from the Mac (signal-plugin-cc):"  # listen()'s wake, seen by quiet()
+REPORT = "<task-notification>"  # how Claude Code opens a prompt it submits itself, a background task's report
 
 
 def project(hook):
@@ -50,18 +51,29 @@ def question(cfg, hook):
         "updatedInput": {**hook["tool_input"], "answers": answers}}}
 
 
+def self_started(prompt):
+    """A prompt Claude Code submitted itself: it opens with a background task's report wrapper (the Signal wake
+    among them) or the wake text. A typed prompt that only mentions either is typed."""
+    return prompt.lstrip().startswith((REPORT, WOKEN))
+
+
 def quiet(cfg, hook):
     """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it.
-    A prompt typed at the Mac also turns the away switch off; a turn woken from Signal does not. The listener
-    learns why it stops, so a message still waiting on Signal is told the Mac took over or the session closed."""
+    A prompt typed at the Mac also turns the away switch off. A turn Claude Code started itself changes nothing:
+    the listener keeps waiting for a reply. The listener learns why it stops, so a message still waiting on
+    Signal is told the Mac took over or the session closed, and then the session forgets its earlier messages."""
     listeners, session = wiring.listeners(cfg), session_id(hook)
     event = hook.get("hook_event_name")
-    typed = event == "UserPromptSubmit" and WOKEN not in hook.get("prompt", "")
+    if event == "UserPromptSubmit" and self_started(hook.get("prompt") or ""):
+        return
+    typed = event == "UserPromptSubmit"
     pid = listeners.get(session)
     listeners.clear(session)
     processes.stop(pid, AT_MAC if typed else CLOSED if event == "SessionEnd" else None)
     if typed:
         wiring.presence(cfg).set_switch(False)
+    if typed or event == "SessionEnd":  # replies to its earlier messages no longer reach it
+        wiring.registry(cfg).forget(session)
 
 
 def listen(cfg, hook):
