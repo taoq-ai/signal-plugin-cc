@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from ..domain.model import AT_MAC, CLOSED, Stopped
+from . import private
 
 RELAY = Path(__file__).resolve().parents[2] / "relay.py"
 SIGNALS = {None: signal.SIGTERM, AT_MAC: signal.SIGUSR1, CLOSED: signal.SIGUSR2}  # why a listener stops
@@ -43,8 +44,8 @@ def stop(pid, why=None):
 
 def spawn(command, log):
     """Run relay.py <command> in the background, detached from the hook that starts it."""
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "ab") as out:
+    private.home(log.parent)
+    with private.open_file(log, "ab") as out:
         subprocess.Popen([sys.executable, str(RELAY), command], stdin=subprocess.DEVNULL, stdout=out,
                          stderr=out, start_new_session=True)
 

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ from unittest import mock
 from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
-from signal_cc.adapters import files, macos, processes
+from signal_cc.adapters import files, macos, private, processes, signal_cli
 from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
@@ -384,6 +385,121 @@ class HooksTest(Base):
         wake = f"<task-notification>Stop hook feedback:\n{err.getvalue()}</task-notification>"
         hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": wake})
         self.assertTrue(switch.on())
+
+
+class PrivateHomeTest(Base):
+    """Other local accounts can't read the relay's state, and a planted symlink never redirects a write."""
+
+    def setUp(self):
+        super().setUp()
+        old = os.umask(0o022)  # the usual default, under which plain files come out 0644
+        self.addCleanup(os.umask, old)
+
+    def write_everything(self, home):
+        """Every write the relay makes under its home, with no process started."""
+        cfg = replace(self.cfg, home=home)
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "Y", "quote": {"id": ts}}})
+        hooks.permission(cfg, {"tool_name": "Bash", "cwd": "/x/proj", "tool_input": {"command": "ls"}})
+        FileRegistry(home).claim("waiting", 60)
+        FileRegistry(home).mark_latest("abcd")
+        AwaySwitch(home).set(True)
+        Listeners(home).set("s1", 123)
+        lock = DeskLock(home)
+        lock.acquire()
+        lock.release()
+        with mock.patch.object(processes.subprocess, "Popen"), mock.patch.object(signal_cli.subprocess, "Popen"):
+            processes.spawn("desk", home / "daemon.log")
+            SignalCli(cfg).start()
+
+    def test_a_fresh_home_is_0700_and_every_file_in_it_0600(self):
+        home = self.home / "fresh"
+        self.write_everything(home)
+        modes = {str(p.relative_to(home)): stat.S_IMODE(p.stat().st_mode) for p in home.rglob("*")}
+        self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
+        self.assertEqual({p for p in modes}, {"relay.log", "pending", "pending/" + next(home.glob("pending/*")).name,
+                                              "last", "away", "listeners", "listeners/s1.pid", "desk.lock",
+                                              "daemon.log"})
+        self.assertEqual({p: m for p, m in modes.items() if m != (0o700 if (home / p).is_dir() else 0o600)}, {})
+
+    def test_an_existing_home_left_open_is_tightened(self):
+        home = self.home / "open"
+        home.mkdir(mode=0o755)
+        FileJournal(home).record({"outcome": "answered"})
+        self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
+
+    def test_no_write_follows_a_symlink_planted_in_the_home(self):
+        home, outside = self.home / "home", self.home / "outside"
+        home.mkdir(mode=0o700)
+        outside.mkdir()
+        for name in ("relay.log", "last", "away", "desk.lock", "daemon.log"):
+            (outside / name).write_text("kept")
+            (home / name).symlink_to(outside / name)
+        (outside / "pending").mkdir()
+        (home / "pending").symlink_to(outside / "pending")
+        (outside / "listeners").mkdir()
+        (outside / "listeners" / "s1.pid").write_text("kept")
+        (home / "listeners").mkdir(mode=0o700)
+        (home / "listeners" / "s1.pid").symlink_to(outside / "listeners" / "s1.pid")
+        with contextlib.redirect_stderr(err := io.StringIO()):
+            FileJournal(home).record({"outcome": "answered"})
+        self.assertIn("relay.log", err.getvalue())
+        writes = [lambda: FileRegistry(home).claim("waiting", 60), lambda: FileRegistry(home).mark_latest("abcd"),
+                  lambda: AwaySwitch(home).set(True), lambda: Listeners(home).set("s1", 123),
+                  lambda: DeskLock(home).acquire(), lambda: processes.spawn("desk", home / "daemon.log"),
+                  lambda: SignalCli(replace(self.cfg, home=home)).start()]
+        with mock.patch.object(processes.subprocess, "Popen") as spawned, \
+                mock.patch.object(signal_cli.subprocess, "Popen") as started:
+            for i, write in enumerate(writes):
+                with self.subTest(write=i), self.assertRaises(OSError):
+                    write()
+        self.assertEqual((spawned.called, started.called), (False, False))
+        self.assertEqual({str(p.relative_to(outside)): p.read_text() for p in outside.rglob("*") if p.is_file()},
+                         {name: "kept" for name in ("relay.log", "last", "away", "desk.lock", "daemon.log",
+                                                    "listeners/s1.pid")})
+
+    def test_a_symlinked_listeners_folder_is_not_written_through(self):
+        home, outside = self.home / "home", self.home / "outside"
+        home.mkdir(mode=0o700)
+        outside.mkdir()
+        (home / "listeners").symlink_to(outside)
+        with self.assertRaises(OSError):
+            Listeners(home).set("s1", 123)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_the_daemon_log_alone_creates_a_private_home(self):
+        with mock.patch.object(processes.subprocess, "Popen"), mock.patch.object(signal_cli.subprocess, "Popen"):
+            processes.spawn("desk", self.home / "a" / "daemon.log")
+            SignalCli(replace(self.cfg, home=self.home / "b")).start()
+        self.assertEqual([stat.S_IMODE((self.home / h).stat().st_mode) for h in "ab"], [0o700, 0o700])
+
+    def test_a_shorter_pid_or_tag_replaces_a_longer_one_whole(self):
+        listeners, registry = Listeners(self.home), FileRegistry(self.home)
+        listeners.set("s", 12345)
+        listeners.set("s", 7)
+        registry.mark_latest("abcdef")
+        registry.mark_latest("ab")
+        self.assertEqual((listeners.get("s"), registry.latest()), (7, "ab"))
+
+    def test_sessions_appending_at_once_keep_every_line(self):
+        path = self.home / "relay.log"
+        with private.open_file(path, "a") as first, private.open_file(path, "a") as second:  # both open, then write
+            first.write("one\n")
+            first.flush()
+            second.write("two\n")
+        self.assertEqual(path.read_text(), "one\ntwo\n")
+
+    def test_a_prompt_logged_through_a_planted_symlink_leaves_the_target_and_the_hook_quiet(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as elsewhere:
+            target = Path(elsewhere, "target")
+            target.write_text("kept")
+            Path(tmp, "relay.log").symlink_to(target)
+            Path(tmp, "config.json").write_text(json.dumps(
+                {"owner": OWNER, "port": 1, "signal_cli": str(Path(tmp, "no-signal-cli"))}))
+            run = subprocess.run([sys.executable, str(ROOT / "relay.py"), "start"],
+                                 env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
+                                 input="{}", capture_output=True, text=True)
+            self.assertEqual((run.returncode, run.stdout, target.read_text()), (0, "", "kept"))
+            self.assertIn("relay.log", run.stderr)
 
 
 class ConfigTest(unittest.TestCase):
