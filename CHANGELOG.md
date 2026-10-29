@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/taoq-ai/signal-plugin-cc/compare/v0.3.0...v0.3.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* refuse a foreign config home, unsafe session ids and symlinked cleanup ([#11](https://github.com/taoq-ai/signal-plugin-cc/issues/11)) ([3771618](https://github.com/taoq-ai/signal-plugin-cc/commit/377161846bdc514841d26346ce5d207d3a26982c))
+
 ## 0.3.0 (2026-10-29)
 
 
