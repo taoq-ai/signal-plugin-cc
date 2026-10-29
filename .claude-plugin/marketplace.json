@@ -1,0 +1,14 @@
+{
+  "name": "signal-plugin-cc",
+  "description": "Signal relay for Claude Code by TaoQ AI Labs.",
+  "owner": {
+    "name": "TaoQ AI Labs"
+  },
+  "plugins": [
+    {
+      "name": "signal",
+      "source": "./",
+      "description": "Answer Claude Code permission prompts and questions from Signal while you're away from your Mac."
+    }
+  ]
+}
