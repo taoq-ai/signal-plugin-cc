@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -174,6 +175,18 @@ class HooksTest(Base):
         self.assertIn("run the tests too", err.getvalue())
         self.assertIsNone(Listeners(self.home).get("s1"))
 
+    def test_a_listener_quieted_mid_wait_is_logged_as_quieted(self):
+        """UserPromptSubmit and SessionEnd stop a waiting listener with SIGTERM: a normal end, not an error."""
+        before = signal.getsignal(signal.SIGTERM)
+        threading.Timer(1.0, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+        try:
+            with self.assertRaises(SystemExit):
+                hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
+        finally:
+            signal.signal(signal.SIGTERM, before)
+        [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
+        self.assertEqual((line["kind"], line["session"], line["outcome"]), ("continue", "s1", "quieted"))
+
     def test_the_desk_answers_status(self):
         registry = FileRegistry(self.home)
         registry.claim("Bash in other:", 60)
@@ -211,18 +224,24 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
 
     def test_a_failing_handler_is_logged_and_the_hook_still_exits_quietly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "config.json").write_text(json.dumps({"owner": OWNER, "port": 1}))
-            run = subprocess.run([sys.executable, str(ROOT / "relay.py"), "permission"],
-                                 env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
-                                 input='{"tool_name": "Bash", "tool_input": {"command": "echo hush"', capture_output=True,
-                                 text=True)
-            log = Path(tmp, "relay.log").read_text()
-        self.assertEqual((run.returncode, run.stdout), (0, ""))
-        line = json.loads(log)
-        self.assertEqual({k: v for k, v in line.items() if k != "time"},
-                         {"handler": "permission", "outcome": "error", "error": "JSONDecodeError"})
-        self.assertNotIn("hush", log)
+        # port 1 is closed and signal_cli is missing, so start fails with an OSError and no daemon is touched
+        cases = [("permission", '{"tool_name": "Bash", "tool_input": {"command": "echo hush"', "JSONDecodeError"),
+                 ("start", "{}", "FileNotFoundError"),
+                 ("bogus-hush", "{}", "KeyError")]
+        for handler, stdin, error in cases:
+            with self.subTest(handler=handler), tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "config.json").write_text(json.dumps(
+                    {"owner": OWNER, "port": 1, "signal_cli": str(Path(tmp, "no-signal-cli"))}))
+                run = subprocess.run([sys.executable, str(ROOT / "relay.py"), handler],
+                                     env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
+                                     input=stdin, capture_output=True, text=True)
+                log = Path(tmp, "relay.log").read_text()
+                self.assertEqual((run.returncode, run.stdout), (0, ""))
+                line = json.loads(log)
+                self.assertEqual({k: v for k, v in line.items() if k != "time"},
+                                 {"handler": handler if handler in ("permission", "start") else "unknown",
+                                  "outcome": "error", "error": error})
+                self.assertNotIn("hush", log)
 
     def test_the_relay_is_the_entry_processes_spawn(self):
         self.assertEqual(processes.RELAY, ROOT / "relay.py")

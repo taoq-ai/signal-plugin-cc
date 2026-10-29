@@ -33,9 +33,13 @@ class Conversation:
         """
         if not self.presence.away():
             return None
-        end, started = {"tag": None, "outcome": "send failed"}, time.time()
+        end, started = {"tag": None, "outcome": "error"}, time.time()
         try:
             return self._ask(form, wait or self.wait, leave_on_return, end)
+        except SystemExit:  # the session's listener was stopped (hooks.quiet): a normal end, not a failure
+            if end["outcome"] in ("error", "send failed"):
+                end["outcome"] = "quieted"
+            raise
         finally:  # one line per prompt, however it ends; never the text or who it went to
             self.journal.record({"kind": form.kind, "tag": end["tag"], "session": self.session,
                                  "outcome": end["outcome"], "waited": round(time.time() - started, 1)})
@@ -46,6 +50,7 @@ class Conversation:
         tag = end["tag"] = self.registry.claim(form.text.splitlines()[0], wait)
         sent = {}  # timestamp of each message of this prompt -> the poll index it holds, or None
         try:
+            end["outcome"] = "send failed"
             sent[self.say(tag, texts.tagged(tag, form.text))] = None
             end["outcome"] = "error"  # until _collect names the end
             for i, poll in enumerate(form.polls):

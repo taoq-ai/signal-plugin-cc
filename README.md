@@ -103,14 +103,24 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 
 ## Relay log
 
-Each prompt sent to Signal adds one JSON line to `~/.config/signal-plugin-cc/relay.log` when it ends: the
-time, the kind (`permission`, `question`, `continue`), its tag, the session id, the outcome (`answered`,
-`timed out`, `back at the Mac`, `stream ended`, `send failed`, `error`) and the seconds waited. A hook that
-fails adds a line with the handler and the exception type. The log never holds message text or phone numbers,
-stays on your Mac and is not rotated. Prompts shown at the Mac are not logged.
+Each prompt sent to Signal adds one JSON line to `relay.log` in the config home (`$SIGNAL_CC_HOME` when set,
+otherwise `~/.config/signal-plugin-cc`) when it ends. A prompt line has the keys `time`, `kind` (`permission`,
+`question`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
+
+- `answered`, `timed out`, `back at the Mac` or `stream ended`;
+- `quieted`: a finished session stopped listening because you typed at the Mac, a new turn ended or the
+  session closed;
+- `send failed`: the prompt's message could not be sent;
+- `error`: anything else, such as an unreachable daemon.
+
+A hook that fails adds a line with the keys `time`, `handler`, `outcome` (`error`) and `error` (the exception
+type). A prompt that fails therefore gives two lines: one with `kind` and one with `handler`. Count prompts
+by the lines with `kind`. The log never holds message text or phone numbers, stays on your Mac and is not
+rotated. Prompts shown at the Mac are not logged.
 
 ```json
 {"time": "2026-10-29T09:12:03Z", "kind": "permission", "tag": "a3f1", "session": "6c1e...", "outcome": "answered", "waited": 41.2}
+{"time": "2026-10-29T09:20:45Z", "handler": "permission", "outcome": "error", "error": "ConnectionRefusedError"}
 ```
 
 If a prompt never reached you or an answer never reached the session, open a

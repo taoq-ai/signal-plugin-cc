@@ -130,6 +130,32 @@ class JournalTest(unittest.TestCase):
             conv(failing, journal=(journal := FakeJournal())).ask(BASH)
         self.assertEqual(self.outcome(journal.lines), "send failed")
 
+    def test_a_daemon_that_cannot_be_reached_is_an_error_not_a_failed_send(self):
+        m, journal = FakeMessenger(), FakeJournal()
+        m.subscribe = lambda: (_ for _ in ()).throw(ConnectionRefusedError())
+        with self.assertRaises(OSError):
+            conv(m, journal=journal).ask(BASH)
+        self.assertEqual((journal.lines[0]["outcome"], journal.lines[0]["tag"]), ("error", None))
+
+    def test_a_stream_that_ends_after_the_answer_records_answered(self):
+        qs = [{"question": "Checks?", "multiSelect": True, "options": [{"label": "lint"}, {"label": "tests"}]}]
+        m = FakeMessenger(lambda t, ts: None)
+
+        def vote_then_end(text, ts):
+            m.replies.put(Reply("", ts, [0]))
+            m.replies.put(None)  # inside the settle window
+        m.script.append(vote_then_end)
+        journal = FakeJournal()
+        self.assertEqual(conv(m, journal=journal).ask(QuestionForm(qs, "proj")), {"Checks?": "lint"})
+        self.assertEqual(self.outcome(journal.lines), "answered")
+
+    def test_a_prompt_ended_by_sigterm_is_quieted_not_an_error(self):
+        m, journal = FakeMessenger(), FakeJournal()
+        m.replies.get = lambda timeout: (_ for _ in ()).throw(SystemExit(0))  # what exit_on_sigterm raises
+        with self.assertRaises(SystemExit):
+            continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
+        self.assertEqual(self.outcome(journal.lines), "quieted")
+
     def test_an_error_while_waiting_is_recorded_and_raised(self):
         registry, journal = FakeRegistry(), FakeJournal()
         registry.waiting = lambda: 1 / 0

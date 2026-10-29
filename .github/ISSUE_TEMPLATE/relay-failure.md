@@ -10,8 +10,9 @@ What you expected, and what you saw on Signal and at the Mac.
 
 **Relay log**
 
-Paste the lines from `~/.config/signal-plugin-cc/relay.log` around the time it happened. They hold no
-message text or phone numbers; check before you paste anyway.
+Paste the lines from `relay.log` around the time it happened. It is in `$SIGNAL_CC_HOME` when set,
+otherwise in `~/.config/signal-plugin-cc`. The lines hold no message text or phone numbers; check before
+you paste anyway.
 
 ```
 ```
