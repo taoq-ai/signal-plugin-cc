@@ -3,12 +3,11 @@ import json
 import os
 import re
 import signal
-import subprocess
 import sys
 import time
 import traceback
 
-from . import presence
+from . import desk, presence
 from .ask import PARTIAL, ask
 from .config import Config
 from .daemon import Daemon
@@ -108,8 +107,7 @@ def quiet(cfg, hook):
     except (OSError, ValueError):
         return
     path.unlink(missing_ok=True)
-    cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
-    if pid != os.getpid() and "relay.py" in cmd:  # never a process that reused the pid
+    if desk.is_relay(pid):
         os.kill(pid, signal.SIGTERM)
 
 
@@ -149,13 +147,15 @@ def listen(cfg, hook):
 
 
 def start(cfg, hook):
-    """SessionStart: start the signal-cli daemon unless one is already up."""
+    """SessionStart: start the signal-cli daemon and the desk unless they are running."""
     daemon = Daemon(cfg)
     if not daemon.is_up():
         daemon.start()
+    desk.spawn(cfg)
 
 
-HANDLERS = {"start": start, "permission": permission, "question": question, "listen": listen, "quiet": quiet}
+HANDLERS = {"start": start, "permission": permission, "question": question, "listen": listen, "quiet": quiet,
+            "desk": desk.run}
 
 
 def main(argv=sys.argv):
@@ -164,7 +164,8 @@ def main(argv=sys.argv):
     if not cfg:
         return
     try:
-        out = HANDLERS[argv[1]](cfg, json.load(sys.stdin))
+        data = sys.stdin.read()  # the desk runs with no hook input
+        out = HANDLERS[argv[1]](cfg, json.loads(data) if data.strip() else {})
     except OSError as e:
         print(f"signal-plugin-cc: signal-cli daemon on port {cfg.port}: {e}", file=sys.stderr)
         return

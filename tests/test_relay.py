@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -264,6 +265,35 @@ class RelayTest(unittest.TestCase):
         finally:
             fake.kill()
             other.kill()
+
+    def incoming(self, text):
+        Daemon.events.put({"jsonrpc": "2.0", "method": "receive",
+                           "params": {"envelope": {"sourceNumber": OWNER, "dataMessage": {"message": text}}}})
+
+    def test_desk_answers_status_with_what_is_waiting(self):
+        from signal_cc import desk
+        self.other_prompt("0aaa", created=0)
+        self.other_prompt("0bbb", created=1)
+        runner = threading.Thread(target=desk.run, args=(self.cfg,))
+        runner.start()
+        time.sleep(0.5)  # the first desk takes the lock
+        self.assertFalse(desk.run(self.cfg))  # a second desk exits at once
+        self.incoming("Status")
+        self.incoming("y")  # not a command: ignored
+        time.sleep(0.3)
+        Daemon.events.put(None)  # the daemon goes away: the desk stops
+        runner.join(timeout=5)
+        self.assertFalse(runner.is_alive())
+        self.assertEqual(len(Daemon.sent), 1)
+        self.assertIn("Waiting for you (2):\n[0aaa] Bash in other:", Daemon.sent[0])
+
+    def test_a_plain_command_is_never_taken_as_an_answer(self):
+        def status_then_yes(m, ts):
+            self.incoming("status")
+            return "y", None
+        Daemon.script.append(status_then_yes)
+        out = hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
 
     def test_at_the_mac_nothing_is_sent(self):
         presence.idle_seconds = lambda: 5

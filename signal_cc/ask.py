@@ -14,7 +14,14 @@ import time
 from . import presence
 from .daemon import Daemon
 
+COMMANDS = {"status"}  # answered by the desk, never taken as a reply
 TAGGED = re.compile(r"\[?([0-9a-f]{4})\]?(?:\s+|$)(.*)", re.I | re.S)
+
+
+def command(reply):
+    """The command a reply is, or None. Only a plain message counts, never one quoting a prompt."""
+    word = reply.text.strip().lower()
+    return word if reply.quoted is None and reply.votes is None and word in COMMANDS else None
 
 
 def waiting(cfg):
@@ -105,6 +112,10 @@ def ask(cfg, text, parse, polls=(), confirm=None, wait=None, leave_on_return=Tru
                 if value is None and leave_on_return and presence.returned():
                     daemon.send(f"[{tag}] You're back at the Mac; answer there.", tag=tag)
                     return None
+                continue
+            if reply is None:
+                return value  # the daemon went away
+            if command(reply):
                 continue
             live = waiting(cfg)
             tagged = TAGGED.match(reply.text)

@@ -80,6 +80,8 @@ class Daemon:
             self._read_lines(resp, out)
         except (OSError, ValueError, AttributeError):
             pass  # ask() closed the stream under us
+        finally:
+            out.put(None)  # the stream ended
 
     def _read_lines(self, resp, out):
         for line in resp:

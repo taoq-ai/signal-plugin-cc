@@ -6,6 +6,8 @@
 
 # signal-plugin-cc
 
+[![Tests](https://github.com/taoq-ai/signal-plugin-cc/actions/workflows/tests.yml/badge.svg)](https://github.com/taoq-ai/signal-plugin-cc/actions/workflows/tests.yml)
+
 Answer Claude Code's permission prompts and questions from Signal when you're away from your Mac.
 It works in any Claude Code session (desktop app, terminal, IDE) because it is a set of hooks, not a CLI mode.
 
@@ -77,6 +79,8 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
    message requests; accept it.
 
 ## Several prompts at once
+
+Send `status` at any time to see what is waiting for you.
 
 Each prompt starts with a tag like `[a3f1]`. A reply never reaches the wrong session: it counts for a prompt only
 when it quotes one of the prompt's messages (swipe to reply), reacts to it, starts with its tag, or is a plain
