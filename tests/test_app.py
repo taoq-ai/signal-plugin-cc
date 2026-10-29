@@ -439,6 +439,19 @@ class DigestTest(unittest.TestCase):
         self.assertEqual(list(self.results), ["a"])
         self.assertEqual(self.results["a"].code, 0)
 
+    def test_more_than_ten_sessions_are_all_listed_and_the_poll_holds_ten(self):
+        projects = [f"p{i:02}" for i in range(11)]
+        for project in projects:
+            self.finish(project)
+        self.sent_count(2)
+        self.assertTrue(self.chat.sent[0].startswith("11 sessions finished:"))
+        self.assertEqual(self.chat.sent[0].count("Done."), 11)
+        self.assertEqual(self.chat.sent[1].count("', '") + 1, 10)  # signal-cli takes 2 to 10 options
+        last = sorted(projects, key=self.tag)[-1]
+        self.chat.post(Reply(f"{self.tag(last)} go on"))  # not in the poll: its tag still reaches it
+        self.until(lambda: last in self.results, "the eleventh to wake")
+        self.assertEqual(self.results, {last: "go on"})
+
     def test_a_refused_poll_leaves_the_digest_and_its_tags(self):
         self.chat.fail_polls = True
         for project in ("a", "b"):
