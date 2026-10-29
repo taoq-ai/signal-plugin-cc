@@ -4,8 +4,8 @@ import unittest
 from support import Reply, Waiting
 from signal_cc.domain import texts
 from signal_cc.domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm, decide, pick
-from signal_cc.domain.model import PARTIAL
-from signal_cc.domain.routing import HINT, SKIP, Take, route
+from signal_cc.domain.model import PARTIAL, Digest
+from signal_cc.domain.routing import HINT, SHOW, SKIP, Gone, Take, route
 
 ME, OTHER = "0a01", "0b02"
 SENT = {101: None, 102: 0}  # my text message, and my poll 0
@@ -35,6 +35,43 @@ class RoutingTest(unittest.TestCase):
         for reply, live, latest, want in cases:
             with self.subTest(reply=reply, live=[w.tag for w in live], latest=latest):
                 self.assertEqual(route(reply, ME, SENT, live, latest), want)
+
+    def test_a_reply_to_a_digest_reaches_one_session_or_none(self):
+        third = "0c03"
+        first = Waiting(1, OTHER, "other:")  # the oldest member: it owes the hint
+        later = Waiting(7, third, "third:")
+        # the digest text (201) and its poll (202), shared by the three members; 101 is my own full message
+        sent = {101: None, 201: Digest((OTHER, ME, third), None), 202: Digest((OTHER, ME, third), (OTHER, ME, third))}
+        all3 = [first, MINE, later]
+        cases = [  # reply, waiting prompts, who I am -> where it goes
+            (Reply(f"[{ME}] run the tests too", 201), all3, ME, Take(Reply("run the tests too", 201), None)),
+            (Reply(f"[{OTHER}] run the tests too"), all3, ME, SKIP),  # tagged for another member
+            (Reply("sounds good", 201), all3, ME, SKIP),  # quotes the digest: the oldest member says which
+            (Reply("sounds good", 201), all3, OTHER, HINT),
+            (Reply("👍", 201), all3, OTHER, HINT),  # a reaction names no session either
+            (Reply("👍", 202), all3, OTHER, HINT),
+            (Reply("👍", 202), all3, ME, SKIP),
+            (Reply("", 202, [1]), all3, ME, SHOW),  # picked me in the poll: show my full message
+            (Reply("", 202, [1]), all3, OTHER, SKIP),
+            (Reply("", 202, [7]), all3, ME, SKIP),  # no such option
+            (Reply("go on", 101), all3, ME, Take(Reply("go on", 101), None)),  # quotes my full message
+            (Reply("go on"), all3, ME, SKIP),  # plain, several waiting: the oldest says which
+            (Reply("go on"), all3, OTHER, HINT),
+            (Reply("sounds good", 201), [MINE, later], ME, HINT),  # the oldest member left: I am the oldest now
+            (Reply(f"[{OTHER}] go on"), [MINE, later], ME, Gone(OTHER)),  # taken over at the Mac
+            (Reply(f"[{OTHER}] go on"), [MINE, later], third, SKIP),
+            (Reply(f"[{OTHER}] go on"), [MINE, later], "0d04", SKIP),  # not in the digest: knows nothing of it
+            (Reply(f"[{third}] go on"), [MINE], ME, SKIP),  # this reply just woke third: not gone, no hint either
+            (Reply("", 202, [0]), [MINE, later], ME, Gone(OTHER)),  # picked a member taken over at the Mac
+            (Reply("", 202, [0]), [MINE, later], third, SKIP),
+            (Reply("", 202, [-1]), all3, third, SKIP),  # no such option, from either end
+            (Reply("", 202, [0, 1]), all3, ME, SKIP),  # a single-choice poll: two picks name no one
+            (Reply(f"[{OTHER}] go on"), [Waiting(0, "0d04", "Bash in x:"), MINE], "0d04", SKIP),  # older, not in it
+        ]
+        for reply, live, me, want in cases:
+            with self.subTest(reply=reply, me=me, live=[w.tag for w in live]):
+                mine = sent if me != "0d04" else {}
+                self.assertEqual(route(reply, me, mine, live, "", gone={OTHER}), want)
 
 
 class FormsTest(unittest.TestCase):
@@ -110,6 +147,34 @@ class FormsTest(unittest.TestCase):
         self.assertEqual((text, tag), (f"Waiting for you (1):\n[{ME}] Bash in proj: \N{MIDDLE DOT} 3 min ago\n"
                                        f"{texts.AWAY_ON}", ME))
         self.assertEqual(texts.hint([MINE, NEW])[1], "")  # several waiting: a plain reply counts for none
+
+    def test_a_digest_lists_each_session_by_tag_project_and_first_line(self):
+        long = "Here is the audit of the eight gates, one paragraph each:\n\n" + "x" * 1400
+        forms = [ContinueForm("Tests pass. I pushed the branch fix-hashes.", "ziran-paper"),
+                 ContinueForm(long, "wuwei"), ContinueForm("y" * 200, "big")]
+        self.assertEqual([f.first for f in forms],
+                         ["Tests pass. I pushed the branch fix-hashes.",
+                          "Here is the audit of the eight gates, one paragraph each:\N{HORIZONTAL ELLIPSIS}",
+                          "y" * 80 + "\N{HORIZONTAL ELLIPSIS}"])
+        self.assertEqual(ContinueForm("\n\n  \nDone.", "p").first, "Done.")
+        self.assertEqual(ContinueForm(None, "p").first, "Finished its turn.")
+        for blank in ("  \n", "\t", "\u2028"):  # whitespace only: today's message, never an error
+            with self.subTest(last=blank):
+                form = ContinueForm(blank, "p")
+                self.assertEqual((form.first, form.text), ("Finished its turn.",
+                                                          "p:\nFinished its turn.\n\nReply to continue this session."))
+        sent_at = 1_800_000_000
+        text = texts.digest([("a3f1", "ziran-paper", forms[0].first, None), ("7c20", "wuwei", forms[1].first, None),
+                             ("e9b4", "signal-plugin-cc", "ignored", sent_at)])
+        at = texts.clock(sent_at)
+        self.assertEqual(text, "3 sessions finished:\n"
+                               "[a3f1] ziran-paper: Tests pass. I pushed the branch fix-hashes.\n"
+                               "[7c20] wuwei: Here is the audit of the eight gates, one paragraph each:\N{HORIZONTAL ELLIPSIS}\n"
+                               f"[e9b4] signal-plugin-cc: (sent at {at}, above)\n\n"
+                               "Start a reply with a tag to continue that session, "
+                               "or pick one in the poll to read it in full.")
+        self.assertRegex(at, r"^\d\d:\d\d$")
+        self.assertEqual(texts.option("a3f1", "p" * 200), "[a3f1] " + "p" * 93)  # signal-cli: 1 to 100 characters
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """State shared by every session on the Mac, kept in files under the config home."""
 import fcntl
 import json
+import os
 import secrets
 import sys
 import time
@@ -126,11 +127,71 @@ class Listeners:
             private.remove(self._path(session))
 
 
+class FileGathering:
+    """Gathering: one JSON file per entry under gather/, and the lead as a lock on gather.lock, which a listener
+    that dies lets go of."""
+
+    def __init__(self, home):
+        self.dir = home / "gather"
+        self.lock = DeskLock(home, "gather.lock")
+
+    def _write(self, tag, row):
+        tmp = self.dir / f".{tag}.{secrets.token_hex(4)}"
+        with private.open_file(tmp, "x") as f:
+            json.dump(row, f)
+        os.replace(tmp, self.dir / tag)  # whole, so a reader never sees half of it; replaces a symlink, never follows
+
+    def enter(self, tag, project, first, sent=None):
+        private.home(self.dir.parent)
+        private.folder(self.dir)
+        self._write(tag, {"created": time.time(), "project": project, "first": first, "sent": sent, "digest": None,
+                          "pid": os.getpid()})
+
+    def entries(self):
+        """The entries of listeners still alive, and the gone ones, kept for their digest until the next lead
+        clears them; one whose listener was killed before it could leave is removed."""
+        out = {}
+        for p in self.dir.glob("[!.]*") if self.dir.exists() else ():
+            try:
+                row = json.loads(p.read_text())
+            except (OSError, ValueError):
+                continue
+            if row.get("gone") or alive(row.get("pid")):
+                out[p.name] = row
+            else:
+                private.remove(p)
+        return out
+
+    def update(self, tag, **fields):
+        row = self.entries().get(tag)
+        if row is not None:
+            self._write(tag, {**row, **fields})
+
+    def leave(self, tag):
+        private.remove(self.dir / tag)
+
+    def lead(self):
+        return self.lock.acquire()
+
+    def unlead(self):
+        self.lock.release()
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, TypeError):
+        return True  # another account's process, or an entry without a pid: leave it to the registry check
+    return True
+
+
 class DeskLock:
     """Held by the one desk that runs on the Mac."""
 
-    def __init__(self, home):
-        self.path = home / "desk.lock"
+    def __init__(self, home, name="desk.lock"):
+        self.path = home / name
         self.file = None
 
     def acquire(self):

@@ -15,13 +15,15 @@ from dataclasses import replace
 from unittest import mock
 from pathlib import Path
 
-from support import OWNER, ROOT, Reply, StubDaemon, serve
+from support import (OWNER, ROOT, Chat, FakeJournal, FakeRegistry, Leaving, Reply, StubDaemon, Waiting,
+                     serve)
 from signal_cc.adapters import files, macos, private, processes, signal_cli
-from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
+from signal_cc.adapters.files import AwaySwitch, DeskLock, FileGathering, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
-from signal_cc.entry import cli, hooks
+from signal_cc.domain.forms import ContinueForm
+from signal_cc.entry import cli, hooks, wiring
 
 
 class Base(unittest.TestCase):
@@ -38,7 +40,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         macos.idle_seconds = lambda: 1000  # away from the Mac
-        conversation.SETTLE, conversation.POLL = 0.3, 0.05
+        conversation.SETTLE, conversation.POLL, conversation.GATHER, conversation.STEP = 0.3, 0.05, 0.3, 0.02
         self.cfg = Config(owner=OWNER, bot="+15550000002", home=self.home, port=self.server.server_port, wait=10)
         env = mock.patch.dict(os.environ)  # the run the tests run in must not decide whether a session is headless
         env.start()
@@ -140,6 +142,61 @@ class FilesTest(Base):
         first.release()
         self.assertTrue(second.acquire())
         second.release()
+
+    def test_gathering_shares_entries_between_listeners_and_one_lead(self):
+        first, second = FileGathering(self.home), FileGathering(self.home)
+        first.enter("aaaa", "proj", "Done.")
+        self.assertEqual(json.loads((self.home / "gather" / "aaaa").read_text())["pid"], os.getpid())
+        second.update("aaaa", sent=5.0)
+        second.update("bbbb", sent=1.0)  # left already: not brought back
+        (self.home / "gather" / "cccc").write_text("{not json")  # half written: skipped
+        (self.home / "gather" / ".aaaa.1f2e").write_text("{}")  # a writer's temp file: not an entry
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        (self.home / "gather" / "dddd").write_text(json.dumps({"created": 1, "project": "p", "first": "x", "sent": None,
+                                                               "digest": None, "pid": dead.pid}))  # killed, never left
+        self.assertEqual(list(second.entries()), ["aaaa"])
+        self.assertFalse((self.home / "gather" / "dddd").exists())
+        row = second.entries()["aaaa"]
+        self.assertEqual((row["project"], row["first"], row["sent"], row["digest"]), ("proj", "Done.", 5.0, None))
+        self.assertTrue(first.lead())
+        self.assertFalse(second.lead())
+        first.unlead()
+        self.assertTrue(second.lead())
+        second.unlead()
+        first.leave("aaaa")
+        first.leave("aaaa")
+        self.assertEqual(second.entries(), {})
+
+    def test_a_member_taken_over_stays_gone_after_its_listener_exits_until_the_next_lead(self):
+        child = ("import sys; sys.path.insert(0, sys.argv[1])\n"
+                 "from pathlib import Path\n"
+                 "from signal_cc.adapters.files import FileGathering\n"
+                 "g = FileGathering(Path(sys.argv[2]))\n"
+                 "g.enter('abcd', 'proj', 'Done.')\n"
+                 "g.update('abcd', sent=1.0, gone='answered at the Mac')\n")
+        subprocess.run([sys.executable, "-c", child, str(ROOT), str(self.home)], check=True)  # wrote gone, exited
+        gathering = FileGathering(self.home)
+        self.assertEqual(gathering.entries()["abcd"]["gone"], "answered at the Mac")
+        self.assertEqual(gathering.entries()["abcd"]["gone"], "answered at the Mac")  # still there when read again
+        # the next lead clears it, even when a new prompt has claimed the same tag meanwhile
+        chat, registry = Chat(), FakeRegistry(Waiting(0, "abcd", "Bash in other:"))
+        leaving, done = Leaving(2), []
+        for project in ("p1", "p2"):
+            c = conversation.Conversation(chat, registry, leaving, 10, FakeJournal(), project, gathering)
+            t = threading.Thread(target=lambda c=c, p=project: done.append(
+                conversation.continue_session(c, ContinueForm("Done.", p), 5, 10)))
+            t.start()
+            self.addCleanup(t.join, 5)
+        for _ in range(250):
+            if chat.sent:
+                break
+            time.sleep(0.02)
+        time.sleep(0.2)
+        chat.post(None)
+        self.assertTrue(chat.sent[0].startswith("2 sessions finished:\n"), chat.sent)
+        self.assertNotIn("abcd", chat.sent[0])
+        self.assertNotIn("abcd", gathering.entries())
 
     def test_stop_ends_a_relay_process_and_nothing_else(self):
         fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "relay.py"])
@@ -276,6 +333,35 @@ class HooksTest(Base):
         self.assertIn("run the tests too", err.getvalue())
         self.assertIsNone(Listeners(self.home).get("s1"))
 
+    def test_two_listeners_wired_to_real_files_send_one_digest(self):
+        looked, lock = set(), threading.Lock()
+
+        def idle():  # the owner is at the Mac until both listeners have looked once, then leaves
+            with lock:
+                done = len(looked) >= 2
+                looked.add(threading.get_ident())
+            return 1000 if done else 0
+        macos.idle_seconds = idle
+        threads = [threading.Thread(target=conversation.continue_session,
+                                    args=(wiring.conversation(self.cfg, s), ContinueForm("Done.", p), 5, 10))
+                   for s, p in (("s1", "p1"), ("s2", "p2"))]
+        for t in threads:
+            t.start()
+        for _ in range(250):
+            if len(StubDaemon.calls) >= 2:
+                break
+            time.sleep(0.02)
+        time.sleep(0.3)
+        StubDaemon.events.put(None)
+        StubDaemon.events.put(None)
+        for t in threads:
+            t.join(5)
+        methods = [m for m, _ in StubDaemon.calls]
+        self.assertEqual(methods[:2], ["send", "sendPollCreate"])
+        self.assertNotIn("send", methods[2:])
+        self.assertTrue(StubDaemon.calls[0][1]["message"].startswith("2 sessions finished:\n["))
+        self.assertEqual(list((self.home / "gather").iterdir()), [])
+
     def test_listen_in_a_headless_run_returns_at_once(self):
         self.claude("-p", "reply ok")
         os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"
@@ -407,6 +493,11 @@ class PrivateHomeTest(Base):
         lock = DeskLock(home)
         lock.acquire()
         lock.release()
+        gathering = FileGathering(home)
+        gathering.enter("abcd", "proj", "Done.")
+        gathering.update("abcd", sent=1.0)
+        gathering.lead()
+        gathering.unlead()
         with mock.patch.object(processes.subprocess, "Popen"), mock.patch.object(signal_cli.subprocess, "Popen"):
             processes.spawn("desk", home / "daemon.log")
             SignalCli(cfg).start()
@@ -418,7 +509,7 @@ class PrivateHomeTest(Base):
         self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
         self.assertEqual({p for p in modes}, {"relay.log", "pending", "pending/" + next(home.glob("pending/*")).name,
                                               "last", "away", "listeners", "listeners/s1.pid", "desk.lock",
-                                              "daemon.log"})
+                                              "daemon.log", "gather", "gather/abcd", "gather.lock"})
         self.assertEqual({p: m for p, m in modes.items() if m != (0o700 if (home / p).is_dir() else 0o600)}, {})
 
     def test_an_existing_home_left_open_is_tightened(self):
@@ -457,14 +548,17 @@ class PrivateHomeTest(Base):
                          {name: "kept" for name in ("relay.log", "last", "away", "desk.lock", "daemon.log",
                                                     "listeners/s1.pid")})
 
-    def test_a_symlinked_listeners_folder_is_not_written_through(self):
-        home, outside = self.home / "home", self.home / "outside"
-        home.mkdir(mode=0o700)
-        outside.mkdir()
-        (home / "listeners").symlink_to(outside)
-        with self.assertRaises(OSError):
-            Listeners(home).set("s1", 123)
-        self.assertEqual(list(outside.iterdir()), [])
+    def test_a_symlinked_listeners_or_gather_folder_is_not_written_through(self):
+        for name, write in [("listeners", lambda home: Listeners(home).set("s1", 123)),
+                            ("gather", lambda home: FileGathering(home).enter("abcd", "proj", "Done."))]:
+            with self.subTest(folder=name):
+                home, outside = self.home / name / "home", self.home / name / "outside"
+                home.mkdir(mode=0o700, parents=True)
+                outside.mkdir()
+                (home / name).symlink_to(outside)
+                with self.assertRaises(OSError):
+                    write(home)
+                self.assertEqual(list(outside.iterdir()), [])
 
     def test_the_daemon_log_alone_creates_a_private_home(self):
         with mock.patch.object(processes.subprocess, "Popen"), mock.patch.object(signal_cli.subprocess, "Popen"):

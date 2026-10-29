@@ -43,7 +43,7 @@ class FakeMessenger:
 
     def send_poll(self, question, options, multi):
         if self.fail_polls:
-            raise RuntimeError("poll refused")
+            raise self.fail_polls if isinstance(self.fail_polls, Exception) else RuntimeError("poll refused")
         return self._out(f"POLL {question} {options} multi={multi}")
 
     def end_poll(self, ts):
@@ -51,6 +51,56 @@ class FakeMessenger:
 
     def subscribe(self):
         return self.replies, lambda: None
+
+
+class Chat(FakeMessenger):
+    """One Signal chat seen by several listeners: every subscriber gets every reply posted."""
+
+    def __init__(self):
+        super().__init__()
+        self.queues, self.lock = [], threading.Lock()
+
+    def _out(self, text):
+        with self.lock:
+            return super()._out(text)
+
+    def subscribe(self):
+        q = queue.Queue()
+        self.queues.append(q)
+        return q, lambda: None
+
+    def post(self, reply):
+        for q in self.queues:
+            q.put(reply)
+
+
+class FakeGathering:
+    """The finished sessions that wait for the owner to leave, and the lead of the next digest."""
+
+    def __init__(self):
+        self.rows, self.lock = {}, threading.Lock()
+
+    def enter(self, tag, project, first, sent=None):
+        self.rows[tag] = {"created": time.time(), "project": project, "first": first, "sent": sent, "digest": None}
+
+    def entries(self):
+        return {tag: dict(row) for tag, row in list(self.rows.items())}
+
+    def update(self, tag, **fields):
+        if tag in self.rows:
+            self.rows[tag].update(fields)
+
+    def leave(self, tag):
+        self.rows.pop(tag, None)
+
+    def lead(self):
+        return self.lock.acquire(blocking=False)
+
+    def unlead(self):
+        self.lock.release()
+
+
+CLAIMS = threading.Lock()
 
 
 class FakeRegistry:
@@ -61,8 +111,9 @@ class FakeRegistry:
         self.n = 0
 
     def claim(self, summary, ttl):
-        self.n += 1
-        tag = f"{self.n:04x}"
+        with CLAIMS:  # listeners in threads claim at once
+            self.n += 1
+            tag = f"{self.n:04x}"
         self.live[tag] = Waiting(10_000_000_000 + self.n, tag, summary)  # newer than any test fixture
         self.expires[tag] = time.time() + ttl
         return tag
@@ -104,6 +155,22 @@ class FakePresence:
 
     def returned(self):
         return self._returned
+
+
+class Leaving(FakePresence):
+    """The owner is at the Mac until n listeners have each looked once, then leaves: every one of them waited."""
+
+    def __init__(self, n):
+        super().__init__(away=False)
+        self.n, self.seen, self.lock = n, set(), threading.Lock()
+
+    def away(self):
+        with self.lock:
+            if self._away:
+                return True
+            self.seen.add(threading.get_ident())
+            self._away = len(self.seen) >= self.n
+            return False
 
 
 def quoting(text):

@@ -1,5 +1,5 @@
 """The composition root: the one place that picks and builds adapters for the ports."""
-from ..adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
+from ..adapters.files import AwaySwitch, DeskLock, FileGathering, FileJournal, FileRegistry, Listeners
 from ..adapters import private
 from ..adapters.macos import MacPresence
 from ..adapters.signal_cli import SignalCli
@@ -36,4 +36,5 @@ def journal(cfg):
 
 
 def conversation(cfg, session):
-    return Conversation(daemon(cfg), registry(cfg), presence(cfg), cfg.wait, journal(cfg), session)
+    return Conversation(daemon(cfg), registry(cfg), presence(cfg), cfg.wait, journal(cfg), session,
+                        FileGathering(cfg.home))

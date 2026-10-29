@@ -1,8 +1,10 @@
 """The use cases against in-memory fakes: no server, no files."""
 import threading
+import time
 import unittest
 
-from support import FakeJournal, FakeMessenger, FakePresence, FakeRegistry, Reply, Waiting, plain, quoting
+from support import (Chat, FakeGathering, FakeJournal, FakeMessenger, FakePresence, FakeRegistry, Leaving, Reply,
+                     Waiting, plain, quoting)
 from signal_cc.app import conversation, desk
 from signal_cc.app.conversation import Conversation, continue_session
 from signal_cc.domain import texts
@@ -278,6 +280,261 @@ class StoppedTest(unittest.TestCase):
                     continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
                 self.assertEqual(stopped.exception.code, 0)
                 self.assertEqual(journal.lines[0]["outcome"], "answered at the Mac")
+
+
+class Ear:
+    """One listener's side of a shared chat, which hooks.quiet can stop like it stops a listener process."""
+
+    def __init__(self, chat):
+        self.chat, self.stop, self.hold = chat, None, None
+
+    def send(self, text):
+        if self.hold:
+            self.hold()  # a slow send: signal-cli can take seconds
+        return self.chat.send(text)
+
+    def send_poll(self, question, options, multi):
+        return self.chat.send_poll(question, options, multi)
+
+    def end_poll(self, ts):
+        self.chat.end_poll(ts)
+
+    def subscribe(self):
+        replies, close = self.chat.subscribe()
+        get = replies.get
+
+        def stoppable(timeout=None):
+            if self.stop:
+                raise Stopped(self.stop)
+            return get(timeout=timeout)
+        replies.get = stoppable
+        return replies, close
+
+
+class DigestTest(unittest.TestCase):
+    """Several sessions finished while the owner was at the Mac: one digest when they leave."""
+
+    def setUp(self):
+        conversation.POLL, conversation.GATHER, conversation.STEP = 0.05, 0.3, 0.02
+        self.chat, self.registry, self.gathering = Chat(), FakeRegistry(), FakeGathering()
+        self.journal, self.results, self.threads, self.ears = FakeJournal(), {}, [], {}
+        self.addCleanup(self.end)
+
+    def finish(self, project, last="Done.", presence=None, hold=None):
+        """A session's turn ends and its listener starts; the owner is away already unless presence says else.
+        hold runs before each of its sends."""
+        ear = self.ears[project] = Ear(self.chat)
+        ear.hold = hold
+        c = Conversation(ear, self.registry, presence or FakePresence(), 10, self.journal, project, self.gathering)
+
+        def run():
+            try:
+                self.results[project] = continue_session(c, ContinueForm(last, project), grace=5, wait=10)
+            except SystemExit as stopped:
+                self.results[project] = stopped
+        thread = threading.Thread(target=run)
+        thread.start()
+        self.threads.append(thread)
+
+    def finish_at_mac(self, projects, last="Done."):
+        """Sessions finish while the owner is at the Mac (each waits for them to leave); then the owner leaves."""
+        leaving = Leaving(len(projects))
+        for project in projects:
+            self.finish(project, last.format(project), leaving)
+
+    def until(self, check, what):
+        end = time.time() + 5
+        while not check():
+            if time.time() > end:
+                self.fail(f"waited for {what}; sent {self.chat.sent}")
+            time.sleep(0.02)
+
+    def sent_count(self, n):
+        self.until(lambda: len(self.chat.sent) >= n, f"{n} messages")
+        time.sleep(0.2)  # and nothing more
+        self.assertEqual(len(self.chat.sent), n, self.chat.sent)
+
+    def ts(self, i):
+        return 1001 + i  # FakeMessenger stamps each message in turn
+
+    def order(self, projects):
+        """The projects in digest order: oldest claim first (listeners in threads claim in any order)."""
+        return sorted(projects, key=self.tag)
+
+    def tag(self, project):
+        return {w.summary: w.tag for w in self.registry.waiting()}[f"{project}:"]
+
+    def end(self):
+        self.chat.post(None)
+        for thread in self.threads:
+            thread.join(5)
+
+    def three(self):
+        self.finish_at_mac(["a", "b", "c"], "{} is done.\nDetails follow.")
+        self.sent_count(2)  # the digest and its poll
+        return [self.tag(p) for p in ("a", "b", "c")]
+
+    def test_three_finished_sessions_get_one_digest_and_a_tag_wakes_one(self):
+        a, b, c = self.three()
+        order = self.order("abc")
+        lines = "".join(f"[{self.tag(p)}] {p}: {p} is done.\N{HORIZONTAL ELLIPSIS}\n" for p in order)
+        self.assertEqual(self.chat.sent[0], f"3 sessions finished:\n{lines}\n"
+                                            "Start a reply with a tag to continue that session, "
+                                            "or pick one in the poll to read it in full.")
+        options = ", ".join(f"'[{self.tag(p)}] {p}'" for p in order)
+        self.assertEqual(self.chat.sent[1], f"POLL Which session? [{options}] multi=False")
+        self.chat.post(Reply(f"[{a}] run the tests too"))
+        self.until(lambda: "a" in self.results, "a to wake")
+        self.assertEqual(self.results["a"], "run the tests too")
+        self.sent_count(3)
+        self.assertEqual(self.chat.sent[2], f"[{a}] \N{CHECK MARK} Sent to a")
+        self.assertNotIn("b", self.results)
+        self.assertNotIn(self.ts(1), self.chat.ended)  # b and c still wait: the poll stays open for them
+        self.end()
+        self.assertEqual((self.results["b"], self.results["c"]), (None, None))
+        self.assertEqual(sorted((line["session"], line.get("digest")) for line in self.journal.lines),
+                         [("a", 3), ("b", 3), ("c", 3)])
+        self.assertIn(self.ts(1), self.chat.ended)  # the last member to end closes the poll
+
+    def test_a_reply_quoting_or_reacting_to_the_digest_gets_one_hint(self):
+        a, b, c = self.three()
+        self.chat.post(Reply("sounds good", self.ts(0)))
+        self.sent_count(3)
+        self.assertTrue(self.chat.sent[2].startswith("Which prompt? 3 waiting:"), self.chat.sent[2])
+        self.chat.post(Reply("\N{THUMBS UP SIGN}", self.ts(1)))
+        self.sent_count(4)
+        self.assertTrue(self.chat.sent[3].startswith("Which prompt? 3 waiting:"))
+        self.assertEqual(self.results, {})
+
+    def test_a_poll_pick_shows_that_session_in_full_and_a_quote_of_it_wakes_it(self):
+        a, b, c = self.three()
+        self.chat.post(Reply("", self.ts(1), [self.order("abc").index("b")]))
+        self.sent_count(3)
+        self.assertEqual(self.chat.sent[2], f"[{b}] b:\nb is done.\nDetails follow.\n\nReply to continue this session.")
+        self.assertEqual(self.results, {})
+        self.chat.post(Reply("go on"))  # plain, three waiting: still the hint
+        self.sent_count(4)
+        self.assertTrue(self.chat.sent[3].startswith("Which prompt? 3 waiting:"))
+        self.chat.post(Reply("go on", self.ts(2)))
+        self.until(lambda: "b" in self.results, "b to wake")
+        self.assertEqual(self.results, {"b": "go on"})
+
+    def test_one_finished_session_gets_todays_single_message(self):
+        self.finish_at_mac(["a"])
+        self.sent_count(1)
+        self.assertEqual(self.chat.sent[0], f"[{self.tag('a')}] a:\nDone.\n\nReply to continue this session.")
+        self.chat.post(Reply("go on"))
+        self.until(lambda: "a" in self.results, "a to wake")
+        self.assertEqual(self.results["a"], "go on")
+        self.assertNotIn("digest", self.journal.lines[0])
+
+    def test_a_session_already_on_signal_is_listed_with_a_pointer_and_its_message_still_works(self):
+        self.finish("e")  # finished while the owner was away: sent at once
+        self.sent_count(1)
+        e = self.tag("e")
+        self.finish_at_mac(["a", "b"])  # the owner came back, two more finished, the owner leaves
+        self.sent_count(3)
+        a, b = self.tag("a"), self.tag("b")
+        self.assertIn(f"3 sessions finished:\n[{e}] e: (sent at ", self.chat.sent[1])
+        first, second = self.order("ab")
+        self.assertIn(f", above)\n[{self.tag(first)}] {first}: Done.\n[{self.tag(second)}] {second}: Done.\n",
+                      self.chat.sent[1])
+        self.assertEqual(self.chat.sent[2], f"POLL Which session? ['[{self.tag(first)}] {first}', "
+                                            f"'[{self.tag(second)}] {second}'] multi=False")
+        self.chat.post(Reply("go on", self.ts(0)))  # quotes e's own message
+        self.until(lambda: "e" in self.results, "e to wake")
+        self.assertEqual(self.results, {"e": "go on"})
+
+    def test_a_session_taken_over_at_the_mac_no_longer_takes_replies_from_the_digest(self):
+        a, b, c = self.three()
+        self.ears["a"].stop = AT_MAC
+        self.chat.post(Reply("", 1))  # wakes the listeners' waits; quotes nothing of theirs
+        self.sent_count(3)
+        self.assertEqual(self.chat.sent[2], f"[{a}] {texts.STOPPED[AT_MAC]}")
+        self.chat.post(Reply(f"[{a}] go on"))
+        self.sent_count(4)
+        self.assertEqual(self.chat.sent[3], f"[{a}] {texts.GONE}")
+        self.assertEqual(list(self.results), ["a"])
+        self.assertEqual(self.results["a"].code, 0)
+
+    def test_more_than_ten_sessions_are_all_listed_and_the_poll_holds_ten(self):
+        projects = [f"p{i:02}" for i in range(11)]
+        self.finish_at_mac(projects)
+        self.sent_count(2)
+        self.assertTrue(self.chat.sent[0].startswith("11 sessions finished:"))
+        self.assertEqual(self.chat.sent[0].count("Done."), 11)
+        self.assertEqual(self.chat.sent[1].count("', '") + 1, 10)  # signal-cli takes 2 to 10 options
+        last = sorted(projects, key=self.tag)[-1]
+        self.chat.post(Reply(f"{self.tag(last)} go on"))  # not in the poll: its tag still reaches it
+        self.until(lambda: last in self.results, "the eleventh to wake")
+        self.assertEqual(self.results, {last: "go on"})
+
+    def refused_poll(self, error):
+        self.chat.fail_polls = error
+        self.finish_at_mac(["a", "b"])
+        self.until(lambda: self.chat.sent, "the digest")
+        a, b = self.tag("a"), self.tag("b")
+        self.chat.post(Reply(f"{a} go on"))
+        self.chat.post(Reply(f"{b} go on too"))
+        self.until(lambda: len(self.results) == 2, "both to wake")  # the lead that sent the digest listens too
+        self.assertEqual(self.results, {"a": "go on", "b": "go on too"})
+        self.assertTrue(self.chat.sent[0].startswith("2 sessions finished:"))
+        self.assertEqual([t for t in self.chat.sent if "finished" in t or "Reply to continue" in t], self.chat.sent[:1])
+
+    def test_a_refused_poll_leaves_the_digest_and_its_tags(self):
+        self.refused_poll(RuntimeError("poll refused"))
+
+    def test_a_poll_that_cannot_be_sent_leaves_the_digest_and_its_tags(self):
+        self.refused_poll(OSError("timed out"))
+
+    def test_sessions_finishing_after_the_digest_send_their_own_message_at_once(self):
+        self.three()
+        conversation.GATHER = 30  # a session that found the owner away must not wait for a digest
+        self.finish("d")
+        self.finish("e")
+        self.sent_count(4)
+        self.assertEqual(sorted(self.chat.sent[2:]), [f"[{self.tag(p)}] {p}:\nDone.\n\nReply to continue this session."
+                                                       for p in sorted("de", key=self.tag)])
+
+    def test_a_session_that_found_the_owner_away_never_goes_out_in_a_digest_while_its_send_is_slow(self):
+        self.finish_at_mac(["a", "b"])
+        # found the owner away: its own message, sent slowly, goes out only after the lead's gather window
+        self.finish("d", hold=lambda: self.until(lambda: len(self.chat.sent) >= 2, "the digest"))
+        self.sent_count(3)
+        self.assertTrue(self.chat.sent[0].startswith("2 sessions finished:"), self.chat.sent[0])
+        self.assertNotIn(self.tag("d"), self.chat.sent[0] + self.chat.sent[1])
+        self.assertEqual(self.chat.sent[2], f"[{self.tag('d')}] d:\nDone.\n\nReply to continue this session.")
+
+    def test_a_poll_pick_of_a_session_taken_over_says_it_no_longer_listens(self):
+        a, b, c = self.three()
+        pick = self.order("abc").index("a")
+        self.ears["a"].stop = AT_MAC
+        self.chat.post(Reply("", 1))
+        self.sent_count(3)  # a's own notice
+        self.chat.post(Reply("", self.ts(1), [pick]))
+        self.sent_count(4)
+        self.assertEqual(self.chat.sent[3], f"[{a}] {texts.GONE}")
+        self.assertEqual(list(self.results), ["a"])
+
+    def test_a_tag_of_a_session_taken_over_gets_one_answer_though_an_older_prompt_waits(self):
+        self.finish("e")  # older, not in the digest
+        self.sent_count(1)
+        self.finish_at_mac(["a", "b"])
+        self.sent_count(3)
+        a = self.tag("a")
+        self.ears["a"].stop = AT_MAC
+        self.chat.post(Reply("", 1))
+        self.sent_count(4)
+        self.chat.post(Reply(f"[{a}] go on"))
+        self.sent_count(5)
+        self.assertEqual(self.chat.sent[4], f"[{a}] {texts.GONE}")
+
+    def test_an_entry_whose_listener_is_gone_is_dropped_not_listed(self):
+        self.gathering.enter("dead", "ghost", "Done.")  # its listener died without cleaning up; no claim waits
+        self.finish_at_mac(["a"])
+        self.sent_count(1)
+        self.assertEqual(self.chat.sent[0], f"[{self.tag('a')}] a:\nDone.\n\nReply to continue this session.")
+        self.assertNotIn("dead", self.gathering.rows)
 
 
 class DeskTest(unittest.TestCase):

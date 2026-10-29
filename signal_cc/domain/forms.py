@@ -144,13 +144,17 @@ class PlanForm:
 
 
 class ContinueForm:
-    """A finished turn's last message; any reply continues the session."""
+    """A finished turn's last message; any reply continues the session. first is its line in a digest."""
     kind = "continue"
     polls = ()
     LIMIT = 1500
+    LINE = 80
 
     def __init__(self, last_message, project):
-        last = (last_message or "Finished its turn.").strip()
+        last = (last_message or "").strip() or "Finished its turn."
+        first = last.splitlines()[0]
+        cut = first[:self.LINE]
+        self.first = cut + ("\N{HORIZONTAL ELLIPSIS}" if cut != last else "")
         if len(last) > self.LIMIT:
             last = last[:self.LIMIT] + "\N{HORIZONTAL ELLIPSIS}"
         self.project = project
