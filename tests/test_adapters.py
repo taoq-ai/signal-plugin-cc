@@ -46,11 +46,20 @@ class Base(unittest.TestCase):
         for key in ("CLAUDE_PID", "CLAUDE_CODE_ENTRYPOINT"):
             os.environ.pop(key, None)
 
+    def visible(self, proc):
+        """Wait until ps shows proc's own command line: a child just spawned may still show its parent's."""
+        for _ in range(500):
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", str(proc.pid)], capture_output=True, text=True).stdout
+            if "time.sleep" in cmd:
+                return proc
+            time.sleep(0.02)
+        self.fail("ps never showed the stand-in process")
+
     def claude(self, *args):
         """A stand-in for the Claude Code process, with its arguments, named by CLAUDE_PID as in a hook."""
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", *args])
         self.addCleanup(lambda: (proc.kill(), proc.wait()))
-        os.environ["CLAUDE_PID"] = str(proc.pid)
+        os.environ["CLAUDE_PID"] = str(self.visible(proc).pid)
         return proc
 
     def tearDown(self):
@@ -145,6 +154,7 @@ class FilesTest(Base):
         fake = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "relay.py"])
         other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
+            self.visible(fake), self.visible(other)
             listeners = Listeners(self.home)
             listeners.set("s1", fake.pid)
             listeners.set("s2", other.pid)
@@ -279,11 +289,11 @@ class HooksTest(Base):
     def test_listen_in_a_headless_run_returns_at_once(self):
         self.claude("-p", "reply ok")
         os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"
-        self.cfg = replace(self.cfg, wait=1, listen=1)  # without the guard, stop waiting soon
+        self.cfg = replace(self.cfg, wait=4, listen=4)  # without the guard, it waits 4 s
         began = time.monotonic()
         out = hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done.",
                                       "stop_hook_active": False})
-        self.assertLess(time.monotonic() - began, 1)
+        self.assertLess(time.monotonic() - began, 3)  # slack for a slow ps on a loaded machine
         self.assertEqual((out, StubDaemon.calls, Listeners(self.home).get("s1")), (None, [], None))
 
     def test_a_listener_quieted_mid_wait_is_logged_as_quieted(self):
