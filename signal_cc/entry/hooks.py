@@ -70,10 +70,10 @@ def quiet(cfg, hook):
     pid = listeners.get(session)
     listeners.clear(session)
     processes.stop(pid, AT_MAC if typed else CLOSED if event == "SessionEnd" else None)
-    if typed or event == "SessionEnd":  # replies to its earlier messages no longer reach it
-        wiring.registry(cfg).forget(session)
     if typed:
         wiring.presence(cfg).set_switch(False)
+    if typed or event == "SessionEnd":  # replies to its earlier messages no longer reach it
+        wiring.registry(cfg).forget(session)
 
 
 def listen(cfg, hook):

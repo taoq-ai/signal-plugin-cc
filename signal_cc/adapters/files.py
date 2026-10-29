@@ -8,7 +8,7 @@ import time
 from ..domain.model import Waiting
 from . import private
 
-KEEP = 86400  # seconds a session's kept messages last without a new one (a crashed session never forgets them)
+KEEP = 86400  # seconds a session keeps its messages without a new one, so a crashed session frees its tags
 
 
 class FileRegistry:
