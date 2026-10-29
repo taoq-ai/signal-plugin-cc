@@ -27,8 +27,13 @@ class Daemon:
                 [self.cfg.signal_cli, "-a", self.cfg.account, "daemon", "--http", f"127.0.0.1:{self.cfg.port}"],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
-    def send(self, text):
-        """Send text to the owner and return the message timestamp Signal quotes in replies."""
+    def send(self, text, tag=""):
+        """Send text to the owner and return the message timestamp Signal quotes in replies.
+
+        tag names the prompt the message belongs to (empty for none); it is recorded before sending,
+        so a plain reply only ever counts for the latest message (ask.latest).
+        """
+        (self.cfg.home / "last").write_text(tag)
         # notifySelf sends Note to Self as a normal message, so the phone notifies
         to = {"noteToSelf": True, "notifySelf": True} if self.cfg.note_to_self else {"recipient": [self.cfg.owner]}
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "send",

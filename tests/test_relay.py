@@ -118,13 +118,45 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["decision"],
                          {"behavior": "deny", "message": "Denied from Signal: use the test db"})
 
-    def test_unquoted_reply_skipped_while_another_prompt_waits(self):
-        self.cfg.pending.mkdir(parents=True)
-        (self.cfg.pending / "zzzz").write_text("9999999999")
+    def other_prompt(self, tag, created):
+        self.cfg.pending.mkdir(parents=True, exist_ok=True)
+        (self.cfg.pending / tag).write_text(json.dumps(
+            {"created": created, "deadline": 9999999999, "summary": "Bash in other:"}))
+
+    def test_plain_reply_while_an_older_prompt_waits_is_left_to_it(self):
+        self.other_prompt("0aaa", created=0)
         Daemon.script.append(lambda m, ts: ("y", None))
         self.cfg = replace(self.cfg, wait=3)
         self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertEqual(len(Daemon.sent), 2)  # the prompt and its timeout; the older prompt owes the hint
         self.assertIn("Timed out", Daemon.sent[-1])
+
+    def test_plain_reply_while_a_newer_prompt_waits_gets_one_hint(self):
+        self.other_prompt("0bbb", created=9999999998)
+        Daemon.script += [lambda m, ts: ("y", None), lambda m, ts: ("0bbb y", None)]
+        self.cfg = replace(self.cfg, wait=3)
+        self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertIn("Which prompt? 2 waiting", Daemon.sent[1])
+        self.assertIn("[0bbb] Bash in other:", Daemon.sent[1])
+        self.assertIn("Timed out", Daemon.sent[2])  # the reply tagged for the other prompt was not taken
+
+    def test_plain_reply_after_another_message_is_confirmed_first(self):
+        def notify_then_reply(m, ts):  # another session's message lands after this prompt
+            (self.cfg.home / "last").write_text("")
+            return "y", None
+        Daemon.script += [notify_then_reply, lambda m, ts: ("y", None)]
+        out = hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
+        self.assertIn("Which prompt? 1 waiting", Daemon.sent[1])
+
+    def test_tags_of_waiting_prompts_are_never_reused(self):
+        from signal_cc import ask
+        drawn = iter(["aaaa", "aaaa", "bbbb"])
+        real, ask.secrets.token_hex = ask.secrets.token_hex, lambda n: next(drawn)
+        try:
+            self.assertEqual([ask.register(self.cfg, "x"), ask.register(self.cfg, "y")], ["aaaa", "bbbb"])
+        finally:
+            ask.secrets.token_hex = real
 
     def test_questions_answered_with_numbers_and_free_text(self):
         qs = [{"question": "Which db?", "header": "DB", "multiSelect": False,
