@@ -6,7 +6,7 @@ from support import FakeMessenger, FakePresence, FakeRegistry, Reply, Waiting, p
 from signal_cc.app import conversation, desk
 from signal_cc.app.conversation import Conversation, continue_session
 from signal_cc.domain import texts
-from signal_cc.domain.forms import ContinueForm, PermissionForm, QuestionForm
+from signal_cc.domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm
 
 BASH = PermissionForm("Bash", {"command": "ls"}, "proj")
 OTHER = "0fff"
@@ -63,6 +63,15 @@ class AskTest(unittest.TestCase):
         self.assertEqual(m.ended, [1002, 1003])
         self.assertIn("Which db? \N{RIGHTWARDS ARROW} Mongo", m.sent[-1])
 
+    def test_a_plan_goes_with_its_poll_and_a_vote_approves_it(self):
+        plan = {"plan": "1. Write hello.txt"}
+        m = FakeMessenger(lambda t, ts: None, lambda t, ts: Reply("", ts, [1]))  # the text, then a vote
+        decision = conv(m).ask(PlanForm(plan, "proj"))
+        self.assertEqual(decision["updatedPermissions"][0]["mode"], "acceptEdits")
+        self.assertIn("Plan from proj:\n1. Write hello.txt", m.sent[0])
+        self.assertTrue(m.sent[1].startswith("POLL [0001] Approve this plan?"))
+        self.assertIn("\N{CHECK MARK} Approved; edits are auto-accepted", m.sent[-1])
+
     def test_unreadable_replies_are_asked_again(self):
         qs = [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]},
               {"question": "Name?", "options": [{"label": "a"}, {"label": "b"}]}]
@@ -79,7 +88,8 @@ class AskTest(unittest.TestCase):
 
     def test_at_the_mac_nothing_is_sent(self):
         m = FakeMessenger()
-        self.assertIsNone(conv(m, presence=FakePresence(away=False)).ask(BASH))
+        for form in (BASH, PlanForm({"plan": "1. Write hello.txt"}, "proj")):
+            self.assertIsNone(conv(m, presence=FakePresence(away=False)).ask(form))
         self.assertEqual(m.sent, [])
 
     def test_coming_back_to_the_mac_hands_the_prompt_back(self):

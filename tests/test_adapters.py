@@ -135,6 +135,23 @@ class HooksTest(Base):
         self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
         self.assertIn("Bash in proj", StubDaemon.calls[0][1]["message"])
 
+    def test_plan_feedback_end_to_end(self):
+        plan = {"plan": "1. Write hello.txt", "planFilePath": "/p/plan.md"}
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "add a migration step",
+                                                                                 "quote": {"id": ts}}})
+        out = hooks.permission(self.cfg, {"tool_name": "ExitPlanMode", "cwd": "/x/proj", "tool_input": plan})
+        self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "PermissionRequest", "decision": {
+            "behavior": "deny", "message": "Keep planning. The owner replied from Signal: add a migration step"}})
+        self.assertIn("Plan from proj", StubDaemon.calls[0][1]["message"])
+        self.assertEqual(StubDaemon.calls[1][0], "sendPollCreate")
+
+    def test_a_plan_is_approved_with_its_input(self):
+        plan = {"plan": "1. Write hello.txt", "planFilePath": "/p/plan.md"}
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {
+            "reaction": {"emoji": "\N{THUMBS UP SIGN}", "targetSentTimestamp": ts}}})
+        out = hooks.permission(self.cfg, {"tool_name": "ExitPlanMode", "cwd": "/x/proj", "tool_input": plan})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow", "updatedInput": plan})
+
     def test_listen_wakes_the_session_with_the_reply(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER,
                                           "dataMessage": {"message": "run the tests too", "quote": {"id": ts}}})

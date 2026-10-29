@@ -3,7 +3,7 @@ import unittest
 
 from support import Reply, Waiting
 from signal_cc.domain import texts
-from signal_cc.domain.forms import ContinueForm, PermissionForm, QuestionForm, decide, pick
+from signal_cc.domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm, decide, pick
 from signal_cc.domain.model import PARTIAL
 from signal_cc.domain.routing import HINT, SKIP, Take, route
 
@@ -59,6 +59,44 @@ class FormsTest(unittest.TestCase):
         self.assertIs(form.parse(Reply("mongo"), None), PARTIAL)  # fills the first open question
         self.assertEqual(form.parse(Reply("my own name", 3), 2),
                          {"Which db?": "Mongo", "Checks?": "lint, tests", "Name?": "my own name"})
+
+    def test_plan_form_reads_votes_reactions_and_feedback(self):
+        plan = {"plan": "# Plan\n1. Write hello.txt", "planFilePath": "/p/plan.md"}
+        form = PlanForm(plan, "proj")
+        self.assertIn("Plan from proj:\n# Plan\n1. Write hello.txt", form.text)
+        self.assertEqual(len(form.polls), 1)
+        self.assertEqual(len(form.polls[0].options), 3)
+        self.assertFalse(form.polls[0].multi)
+        ask = {"behavior": "allow", "updatedInput": plan}  # updatedInput: an allow without it leaves plan mode on
+        auto = {**ask, "updatedPermissions": [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]}
+        keep = {"behavior": "deny", "message": "Keep planning (from Signal)"}
+        cases = [
+            (Reply("", 102, [0]), 0, ask),
+            (Reply("", 102, [1]), 0, auto),
+            (Reply("", 102, [2]), 0, keep),
+            (Reply("\N{THUMBS UP SIGN}\U0001F3FD", 101), None, ask),
+            (Reply("\N{THUMBS DOWN SIGN}", 101), None, keep),
+            (Reply("n"), None, keep),
+            (Reply("add a migration step", 101), None,
+             {"behavior": "deny", "message": "Keep planning. The owner replied from Signal: add a migration step"}),
+            (Reply("add a migration step", 102), 0,
+             {"behavior": "deny", "message": "Keep planning. The owner replied from Signal: add a migration step"}),
+            (Reply(""), None, None),
+            (Reply("", 102, []), 0, None),
+            (Reply("", 102, [3]), 0, None),
+        ]
+        for reply, target, want in cases:
+            with self.subTest(reply=reply):
+                self.assertEqual(form.parse(reply, target), want)
+        self.assertEqual([form.receipt(ask), form.receipt(auto), form.receipt(keep)],
+                         ["Approved; edits still ask", "Approved; edits are auto-accepted", "Keep planning"])
+
+    def test_a_long_plan_is_cut_with_its_length_noted(self):
+        form = PlanForm({"plan": "x" * 5000}, "proj")
+        self.assertIn("x" * PlanForm.LIMIT + "\N{HORIZONTAL ELLIPSIS}", form.text)
+        self.assertNotIn("x" * (PlanForm.LIMIT + 1), form.text)
+        self.assertIn(f"first {PlanForm.LIMIT} of 5000 characters", form.text)
+        self.assertEqual(len(form.polls), 1)
 
     def test_texts(self):
         self.assertIn("rm -rf build", PermissionForm("Bash", {"command": "rm -rf build"}, "proj").text)
