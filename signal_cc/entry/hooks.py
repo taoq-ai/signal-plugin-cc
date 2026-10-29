@@ -52,9 +52,9 @@ def question(cfg, hook):
 
 
 def self_started(prompt):
-    """A prompt Claude Code submitted itself (a background task's report, the Signal wake among them), not one
-    typed at the Mac."""
-    return prompt.lstrip().startswith(REPORT) or WOKEN in prompt
+    """A prompt Claude Code submitted itself: it opens with a background task's report wrapper (the Signal wake
+    among them) or the wake text. A typed prompt that only mentions either is typed."""
+    return prompt.lstrip().startswith((REPORT, WOKEN))
 
 
 def quiet(cfg, hook):

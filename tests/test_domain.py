@@ -45,7 +45,9 @@ class RoutingTest(unittest.TestCase):
             (Reply("[0c03] run it"), [OLD, MINE, NEW], OTHER, Take(Reply("run it"), None)),
             (Reply("0d04 run it"), [MINE], ME, SKIP),  # the other session's earlier tag, though I am alone
             (Reply("0d04 run it"), [MINE, NEW], ME, SKIP),  # and no hint either: it names a session
+            (Reply("[0C03] run it"), [MINE, NEW], ME, Take(Reply("run it"), None)),  # tags ignore case
             (Reply(f"{OTHER} y"), [MINE, NEW], ME, SKIP),  # a live tag wins
+            (Reply("0c03 y"), [MINE, Waiting(9, "0c03", "Bash in other:")], ME, SKIP),  # even over one of mine
         ]
         for reply, live, latest, want in cases:
             with self.subTest(reply=reply, live=[w.tag for w in live], latest=latest):

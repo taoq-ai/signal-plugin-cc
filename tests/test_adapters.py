@@ -357,6 +357,9 @@ class HooksTest(Base):
         cases = [({"hook_event_name": "UserPromptSubmit", "prompt": "run it"}, signal.SIGUSR1),
                  ({"hook_event_name": "SessionEnd"}, signal.SIGUSR2),
                  ({"hook_event_name": "UserPromptSubmit", "prompt": f"why did\n{TASK_DONE}\nstop?"}, signal.SIGUSR1),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": f"rename WOKEN = \"{hooks.WOKEN}\""},
+                  signal.SIGUSR1),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": None}, signal.SIGUSR1),
                  ({"hook_event_name": "Stop"}, signal.SIGTERM)]
         for hook, expected in cases:
             with self.subTest(hook=hook["hook_event_name"], expected=expected.name):
@@ -469,6 +472,10 @@ class HooksTest(Base):
         hooks.quiet(self.cfg, {"hook_event_name": "SessionEnd", "session_id": "s1"})
         self.assertTrue(switch.on())
         hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "run it"})
+        self.assertFalse(switch.on())
+        switch.set(True)  # a typed prompt that mentions the wake text is still typed
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1",
+                               "prompt": f"rename WOKEN = \"{hooks.WOKEN}\" to WAKE"})
         self.assertFalse(switch.on())
 
     def test_a_turn_woken_from_signal_leaves_the_switch_on(self):
