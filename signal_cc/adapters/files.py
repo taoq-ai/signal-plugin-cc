@@ -62,6 +62,24 @@ class FileRegistry:
         (self.home / "last").write_text(tag)
 
 
+class AwaySwitch:
+    """The away switch: on while the file away exists."""
+
+    def __init__(self, home):
+        self.home = home
+        self.path = home / "away"
+
+    def on(self):
+        return self.path.exists()
+
+    def set(self, on):
+        if on:
+            self.home.mkdir(parents=True, exist_ok=True)
+            self.path.touch()
+        else:
+            self.path.unlink(missing_ok=True)
+
+
 class FileJournal:
     """Journal: one JSON line per entry in relay.log, appended by every session on the Mac."""
 

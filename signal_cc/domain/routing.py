@@ -7,7 +7,7 @@ sent belongs to it. For any other plain reply, the oldest waiting prompt sends o
 import re
 from collections import namedtuple
 
-COMMANDS = {"status"}  # answered by the desk, never taken as a reply
+COMMANDS = {"status", "away", "back"}  # answered by the desk, never taken as a reply
 TAGGED = re.compile(r"\[?([0-9a-f]{4})\]?(?:\s+|$)(.*)", re.I | re.S)
 
 Take = namedtuple("Take", "reply target")  # the reply is for this prompt; target is the poll index, or None

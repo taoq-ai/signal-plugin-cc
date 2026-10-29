@@ -28,6 +28,9 @@ class RoutingTest(unittest.TestCase):
             (Reply("", 102, [1]), [MINE], ME, Take(Reply("", 102, [1]), 0)),  # a vote in my poll
             (Reply("status"), [MINE], ME, SKIP),  # a command is for the desk
             (Reply("status", 101), [MINE], ME, Take(Reply("status", 101), None)),  # quoted: an answer
+            (Reply(" Away "), [MINE], ME, SKIP),  # the away switch is for the desk too
+            (Reply("back"), [MINE], ME, SKIP),
+            (Reply("away", 101), [MINE], ME, Take(Reply("away", 101), None)),  # quoted: an answer
         ]
         for reply, live, latest, want in cases:
             with self.subTest(reply=reply, live=[w.tag for w in live], latest=latest):
@@ -64,9 +67,10 @@ class FormsTest(unittest.TestCase):
         self.assertIn("rm -rf build", PermissionForm("Bash", {"command": "rm -rf build"}, "proj").text)
         self.assertTrue(ContinueForm("x" * 2000, "proj").text.endswith("\N{HORIZONTAL ELLIPSIS}\n\nReply to continue "
                                                                        "this session."))
-        self.assertEqual(texts.status([], 0), ("Nothing is waiting for you.", ""))
-        text, tag = texts.status([MINE], 5 + 180)
-        self.assertEqual((text, tag), (f"Waiting for you (1):\n[{ME}] Bash in proj: \N{MIDDLE DOT} 3 min ago", ME))
+        self.assertEqual(texts.status([], 0, False), (f"Nothing is waiting for you.\n{texts.AWAY_OFF}", ""))
+        text, tag = texts.status([MINE], 5 + 180, True)
+        self.assertEqual((text, tag), (f"Waiting for you (1):\n[{ME}] Bash in proj: \N{MIDDLE DOT} 3 min ago\n"
+                                       f"{texts.AWAY_ON}", ME))
         self.assertEqual(texts.hint([MINE, NEW])[1], "")  # several waiting: a plain reply counts for none
 
 
