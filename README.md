@@ -3,8 +3,8 @@
 Answer Claude Code's permission prompts and questions from Signal when you're away from your Mac.
 It works in any Claude Code session (desktop app, terminal, IDE) because it is a set of hooks, not a CLI mode.
 
-- **Permission prompts:** the bot sends you the tool and its command or file. Reply `y` to allow, `n` to deny,
-  or anything else to deny and tell Claude why ("use the test database").
+- **Permission prompts:** the bot sends you the tool and its command or file. React 👍 or reply `y` to allow;
+  react 👎 or reply `n` to deny, or reply anything else to deny and tell Claude why ("use the test database").
 - **Questions (AskUserQuestion):** the bot sends the questions with numbered options. Reply one line per
   question with an option number (`1,3` for multi-select) or your own answer.
 - **Waiting for input:** when a session finishes and waits for you, the bot tells you.
@@ -68,8 +68,10 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
 
 ## Several prompts at once
 
-Each prompt starts with a tag like `[a3f1]`. If only one prompt is waiting, just reply. If several are waiting,
-reply to the message in Signal (swipe to quote it) or start your reply with its tag.
+Each prompt starts with a tag like `[a3f1]`. A reply never reaches the wrong session: it counts for a prompt only
+when it quotes one of the prompt's messages (swipe to reply), reacts to it, starts with its tag, or is a plain
+reply while that prompt is the only one waiting and the latest message. Any other plain reply gets one hint that
+lists the waiting prompts.
 
 ## Security
 

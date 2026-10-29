@@ -1,6 +1,7 @@
 """The hook handlers: each takes the config and the hook's input and returns its output or None."""
 import json
 import os
+import re
 import sys
 import traceback
 
@@ -9,8 +10,8 @@ from .ask import ask
 from .config import Config
 from .daemon import Daemon
 
-YES = {"y", "yes", "ok", "allow"}
-NO = {"n", "no", "deny"}
+YES = {"y", "yes", "ok", "allow", "\N{THUMBS UP SIGN}"}
+NO = {"n", "no", "deny", "\N{THUMBS DOWN SIGN}"}
 
 
 def project(hook):
@@ -18,7 +19,7 @@ def project(hook):
 
 
 def decide(reply):
-    word = reply.lower()
+    word = re.sub("[\U0001F3FB-\U0001F3FF️]", "", reply).lower()  # 👍🏽 counts as 👍
     if word in YES:
         return {"behavior": "allow"}
     reason = "" if word in NO else f": {reply}"
@@ -32,7 +33,8 @@ def permission(cfg, hook):
         return None  # question() answers AskUserQuestion; plan approval stays on the Mac
     detail = inp.get("command") or inp.get("file_path") or inp.get("url") or json.dumps(inp)
     what = f"{inp['description']}\n" if inp.get("description") else ""
-    text = f"{tool} in {project(hook)}:\n{what}{detail[:600]}\n\nReply y to allow, n or a reason to deny."
+    text = (f"{tool} in {project(hook)}:\n{what}{detail[:600]}\n\n"
+            "React \N{THUMBS UP SIGN} or reply y to allow; \N{THUMBS DOWN SIGN}, n or a reason to deny.")
     decision = ask(cfg, text, decide)
     return decision and {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                                 "decision": decision}}

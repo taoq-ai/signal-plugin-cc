@@ -45,7 +45,7 @@ class Daemon(BaseHTTPRequestHandler):
         ts = 1000 + len(Daemon.sent)
         if Daemon.script and "Timed out" not in message:
             text, quote, *dest = Daemon.script.pop(0)(message, ts)
-            msg = {"message": text, **({"quote": {"id": quote}} if quote else {})}
+            msg = text if isinstance(text, dict) else {"message": text, **({"quote": {"id": quote}} if quote else {})}
             if body["params"].get("noteToSelf"):
                 env = {"syncMessage": {"sentMessage": {"destinationNumber": (dest or [OWNER])[0], **msg}}}
             else:
@@ -111,6 +111,16 @@ class RelayTest(unittest.TestCase):
         Daemon.script.append(lambda m, ts: ("y", ts, "+15550000009"))
         self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
         self.assertIn("Timed out", Daemon.sent[-1])
+
+    def test_reactions_answer_the_message_they_react_to(self):
+        def react(emoji, target):
+            return {"reaction": {"emoji": emoji, "targetSentTimestamp": target, "isRemove": False}}, None
+        Daemon.script.append(lambda m, ts: react("\N{THUMBS DOWN SIGN}", ts))
+        out = hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "deny", "message": "Denied from Signal"})
+        Daemon.script.append(lambda m, ts: react("\N{THUMBS UP SIGN}", ts - 1))  # another message's reaction
+        self.cfg = replace(self.cfg, wait=3)
+        self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
 
     def test_permission_denied_with_reason_by_tag(self):
         Daemon.script.append(lambda m, ts: (f"{tag(m)} use the test db", None))

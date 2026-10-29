@@ -73,5 +73,11 @@ class Daemon:
             sent = (env.get("syncMessage") or {}).get("sentMessage") or {}
             to_self = sent.get("destinationNumber", sent.get("destination")) == self.cfg.owner
             msg = sent if to_self else env.get("dataMessage") or {}
-            if env.get("sourceNumber", env.get("source")) == self.cfg.owner and msg.get("message"):
+            if env.get("sourceNumber", env.get("source")) != self.cfg.owner:
+                continue
+            reaction = msg.get("reaction") or {}
+            if reaction.get("emoji") and not reaction.get("isRemove"):
+                # a reaction answers with its emoji, addressed to the message it reacts to
+                out.put((reaction["emoji"], reaction.get("targetSentTimestamp")))
+            elif msg.get("message"):
                 out.put((msg["message"].strip(), (msg.get("quote") or {}).get("id")))
