@@ -15,17 +15,27 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
 
 ## Setup
 
-You need a second phone number for the bot (a prepaid SIM or a landline; Signal blocks many VoIP numbers).
-The bot messages you like any contact, so you get normal notifications, and it never sees your own messages.
-
-1. Install signal-cli (it brings Java):
+1. Install signal-cli (it brings Java) and qrencode:
 
    ```bash
-   brew install signal-cli
+   brew install signal-cli qrencode
    ```
 
-2. Register the bot number. Signal requires a captcha: open https://signalcaptchas.org/registration/generate.html,
-   solve it, and copy the `signalcaptcha://` link it opens.
+2. Link signal-cli to Signal. Pick one:
+
+   **Your own number (simplest).** signal-cli becomes a linked device on your account, and prompts arrive in
+   Note to Self, sent so that your phone still notifies. Like any linked device, signal-cli then receives your
+   messages and stores them in `~/.local/share/signal-cli`. This opens the QR code in Preview; scan it from
+   Signal → Settings → Linked devices → Link new device:
+
+   ```bash
+   L="$TMPDIR/signal-link.txt"; signal-cli link -n "Claude relay" > "$L" 2>&1 & until grep -q sgnl:// "$L" 2>/dev/null; do sleep 1; done; qrencode -o "$TMPDIR/signal-link.png" "$(grep -o 'sgnl://[^ ]*' "$L")" && open "$TMPDIR/signal-link.png"; wait; cat "$L"
+   ```
+
+   **A separate bot number.** The bot messages you like any contact and never sees your own messages. You need
+   a second number that can receive an SMS (a prepaid SIM) or a call (a landline); Signal blocks many VoIP
+   numbers. Signal requires a captcha: open https://signalcaptchas.org/registration/generate.html, solve it,
+   then right-click "Open Signal" and copy the link (clicking it hands the token to Signal Desktop instead).
 
    ```bash
    signal-cli -a +BOTNUMBER register --captcha 'signalcaptcha://...'
@@ -34,18 +44,16 @@ The bot messages you like any contact, so you get normal notifications, and it n
    signal-cli -a +BOTNUMBER updateProfile --given-name Claude
    ```
 
-   For a landline, add `--voice` to `register` (after one SMS attempt) to get the code by call.
-   `setPin` turns on registration lock so nobody can take the number over.
-
 3. Write `~/.config/signal-plugin-cc/config.json`:
 
    ```json
-   {"bot": "+BOTNUMBER", "owner": "+YOURNUMBER"}
+   {"owner": "+YOURNUMBER"}
    ```
 
-   Optional keys: `wait` (seconds to wait for a reply, default 300, at most 3500), `idle` (seconds without
-   input before the Mac counts as unattended, default 60), `port` (signal-cli daemon port, default 8299),
-   `signal_cli` (path to signal-cli). Only messages from `owner` are read.
+   With a bot number, add `"bot": "+BOTNUMBER"`. Optional keys: `wait` (seconds to wait for a reply, default
+   300, at most 3500), `idle` (seconds without input before the Mac counts as unattended, default 60), `port`
+   (signal-cli daemon port, default 8299), `signal_cli` (path to signal-cli). Only replies from `owner` are read.
+   A misspelled or missing key is reported on stderr and turns the plugin off.
 
 4. Install the plugin in Claude Code:
 
@@ -55,8 +63,8 @@ The bot messages you like any contact, so you get normal notifications, and it n
    ```
 
 5. Start a new session. It starts the signal-cli daemon if it isn't running (log in
-   `~/.config/signal-plugin-cc/daemon.log`). The first message from the bot may land in Signal's message
-   requests; accept it.
+   `~/.config/signal-plugin-cc/daemon.log`). With a bot number, the first message may land in Signal's
+   message requests; accept it.
 
 ## Several prompts at once
 
@@ -66,7 +74,7 @@ reply to the message in Signal (swipe to quote it) or start your reply with its 
 ## Security
 
 Anyone who can send messages as `owner` can approve tool calls in your sessions. Keep registration lock on
-for both numbers. Plan approval (ExitPlanMode) is never relayed; it stays on the Mac.
+for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; it stays on the Mac.
 
 ## Limits
 

@@ -21,8 +21,12 @@ OWNER = "+15550000001"
 
 
 class Daemon(BaseHTTPRequestHandler):
-    """Records sends; answers each prompt with the next scripted reply(message, timestamp) -> (text, quote)."""
-    sent, script, events = [], [], queue.Queue()
+    """Records sends; answers each prompt with the next scripted reply(message, timestamp) -> (text, quote).
+
+    In Note to Self mode the reply arrives as a sync of a message sent to the owner, as from the phone;
+    a script may return (text, quote, destination) to sync a message sent to someone else.
+    """
+    sent, params, script, events = [], [], [], queue.Queue()
 
     def do_GET(self):
         self.send_response(200)
@@ -37,12 +41,17 @@ class Daemon(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         message = body["params"]["message"]
         Daemon.sent.append(message)
+        Daemon.params.append(body["params"])
         ts = 1000 + len(Daemon.sent)
         if Daemon.script and "Timed out" not in message:
-            text, quote = Daemon.script.pop(0)(message, ts)
+            text, quote, *dest = Daemon.script.pop(0)(message, ts)
             msg = {"message": text, **({"quote": {"id": quote}} if quote else {})}
+            if body["params"].get("noteToSelf"):
+                env = {"syncMessage": {"sentMessage": {"destinationNumber": (dest or [OWNER])[0], **msg}}}
+            else:
+                env = {"dataMessage": msg}
             Daemon.events.put({"jsonrpc": "2.0", "method": "receive",
-                               "params": {"envelope": {"sourceNumber": OWNER, "dataMessage": msg}}})
+                               "params": {"envelope": {"sourceNumber": OWNER, **env}}})
         out = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": {"timestamp": ts}}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
@@ -69,6 +78,7 @@ class RelayTest(unittest.TestCase):
 
     def setUp(self):
         Daemon.sent.clear()
+        Daemon.params.clear()
         Daemon.script.clear()
         Daemon.events = queue.Queue()
         self.tmp = tempfile.TemporaryDirectory()
@@ -87,6 +97,20 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
         self.assertIn("rm -rf build", Daemon.sent[0])
         self.assertIn("Bash in proj", Daemon.sent[0])
+
+    def test_own_account_prompts_and_replies_through_note_to_self(self):
+        self.cfg = replace(self.cfg, bot="")
+        Daemon.script.append(lambda m, ts: ("y", ts))
+        out = hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
+        self.assertEqual({k: v for k, v in Daemon.params[0].items() if k != "message"},
+                         {"noteToSelf": True, "notifySelf": True})
+
+    def test_own_account_ignores_what_you_send_to_others(self):
+        self.cfg = replace(self.cfg, bot="", wait=3)
+        Daemon.script.append(lambda m, ts: ("y", ts, "+15550000009"))
+        self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+        self.assertIn("Timed out", Daemon.sent[-1])
 
     def test_permission_denied_with_reason_by_tag(self):
         Daemon.script.append(lambda m, ts: (f"{tag(m)} use the test db", None))
@@ -137,6 +161,8 @@ class RelayTest(unittest.TestCase):
             self.assertEqual((Config.load().port, Config.load().wait), (8299, 300))
             path.write_text('{"bot": "+1", "owner": "+2", "wiat": 5}')
             self.assertIsNone(Config.load())
+            path.write_text('{"owner": "+2"}')
+            self.assertEqual((Config.load().account, Config.load().note_to_self), ("+2", True))
         finally:
             del os.environ["SIGNAL_CC_HOME"]
 

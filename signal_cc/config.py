@@ -10,13 +10,22 @@ DEFAULT_HOME = Path.home() / ".config" / "signal-plugin-cc"
 
 @dataclass(frozen=True)
 class Config:
-    bot: str  # the bot's Signal number
-    owner: str  # the only number whose replies are read
+    owner: str  # your Signal number; only its replies are read
     home: Path  # config, pending prompts and the daemon log
+    bot: str = ""  # a separate bot number; empty means your own account, through Note to Self
     port: int = 8299  # signal-cli HTTP daemon port
     wait: int = 300  # seconds to wait for a reply
     idle: int = 60  # seconds without input before the Mac counts as unattended
     signal_cli: str = "signal-cli"
+
+    @property
+    def account(self):
+        """The account signal-cli runs as."""
+        return self.bot or self.owner
+
+    @property
+    def note_to_self(self):
+        return self.account == self.owner
 
     @property
     def pending(self):
@@ -39,7 +48,7 @@ class Config:
         except TypeError as e:  # a missing or unknown key
             print(f"signal-plugin-cc: {path}: {e}", file=sys.stderr)
             return None
-        if not (cfg.bot and cfg.owner):
-            print(f"signal-plugin-cc: {path}: bot and owner are required", file=sys.stderr)
+        if not cfg.owner:
+            print(f"signal-plugin-cc: {path}: owner is required", file=sys.stderr)
             return None
         return cfg

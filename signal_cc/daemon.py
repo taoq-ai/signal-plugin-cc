@@ -24,13 +24,15 @@ class Daemon:
         self.cfg.home.mkdir(parents=True, exist_ok=True)
         with open(self.cfg.home / "daemon.log", "ab") as log:
             subprocess.Popen(
-                [self.cfg.signal_cli, "-a", self.cfg.bot, "daemon", "--http", f"127.0.0.1:{self.cfg.port}"],
+                [self.cfg.signal_cli, "-a", self.cfg.account, "daemon", "--http", f"127.0.0.1:{self.cfg.port}"],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
     def send(self, text):
         """Send text to the owner and return the message timestamp Signal quotes in replies."""
+        # notifySelf sends Note to Self as a normal message, so the phone notifies
+        to = {"noteToSelf": True, "notifySelf": True} if self.cfg.note_to_self else {"recipient": [self.cfg.owner]}
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "send",
-                           "params": {"recipient": [self.cfg.owner], "message": text}}).encode()
+                           "params": {**to, "message": text}}).encode()
         req = urllib.request.Request(f"{self.base}/rpc", body, {"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r)["result"]["timestamp"]
@@ -48,11 +50,23 @@ class Daemon:
         return replies, conn.close
 
     def _read(self, resp, out):
+        try:
+            self._read_lines(resp, out)
+        except (OSError, ValueError, AttributeError):
+            pass  # ask() closed the stream under us
+
+    def _read_lines(self, resp, out):
         for line in resp:
             if not line.startswith(b"data:"):
                 continue
-            event = json.loads(line[5:])
+            try:
+                event = json.loads(line[5:])
+            except ValueError:
+                continue
             env = event.get("params", event).get("envelope", {})
-            msg = env.get("dataMessage") or {}
+            # on your own account, what you type into Note to Self arrives as a sync of a sent message
+            sent = (env.get("syncMessage") or {}).get("sentMessage") or {}
+            to_self = sent.get("destinationNumber", sent.get("destination")) == self.cfg.owner
+            msg = sent if to_self else env.get("dataMessage") or {}
             if env.get("sourceNumber", env.get("source")) == self.cfg.owner and msg.get("message"):
                 out.put((msg["message"].strip(), (msg.get("quote") or {}).get("id")))
