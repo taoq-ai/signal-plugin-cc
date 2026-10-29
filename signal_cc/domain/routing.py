@@ -3,6 +3,10 @@
 A reply counts for a prompt only when it quotes or reacts to one of the prompt's messages, starts with
 its tag, or is a plain reply while the prompt is the only one waiting and the latest message the relay
 sent belongs to it. For any other plain reply, the oldest waiting prompt sends one hint.
+
+While a session's turns continue, it keeps the tags and messages its earlier turns' listeners sent, and its
+current listener takes a reply that quotes or tags any of them. No other prompt takes a kept tag: no prompt
+claims one, and a reply tagged with another session's kept tag is not taken as a plain reply.
 """
 import re
 from collections import namedtuple
@@ -21,11 +25,12 @@ def command(reply):
     return word if reply.quoted is None and reply.votes is None and word in COMMANDS else None
 
 
-def route(reply, me, sent, live, latest):
+def route(reply, me, sent, live, latest, mine=(), kept=()):
     """Where a reply goes, seen from the prompt tagged me.
 
-    sent maps the timestamp of each of my messages to the poll it holds (None for text); live is the
-    waiting prompts, oldest first; latest is the tag of the prompt the relay's latest message belongs to.
+    sent maps the timestamp of each of my messages to the poll it holds (None for text), my session's earlier
+    messages included; live is the waiting prompts, oldest first; latest is the tag of the prompt the relay's
+    latest message belongs to; mine is my session's kept tags, and kept every session's.
     """
     if command(reply):
         return SKIP
@@ -34,6 +39,10 @@ def route(reply, me, sent, live, latest):
         if tagged.group(1).lower() != me:
             return SKIP
         return Take(reply._replace(text=tagged.group(2).strip()), None)
+    if tagged and tagged.group(1).lower() in mine:
+        return Take(reply._replace(text=tagged.group(2).strip()), None)
+    if tagged and tagged.group(1).lower() in kept:  # another session's earlier message
+        return SKIP
     if reply.quoted is not None:
         return Take(reply, sent[reply.quoted]) if reply.quoted in sent else SKIP
     if any(w.tag != me for w in live) or latest != me:

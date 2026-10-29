@@ -36,6 +36,23 @@ class RoutingTest(unittest.TestCase):
             with self.subTest(reply=reply, live=[w.tag for w in live], latest=latest):
                 self.assertEqual(route(reply, ME, SENT, live, latest), want)
 
+    def test_a_tag_of_an_earlier_turn_reaches_its_own_session_only(self):
+        """Tags an earlier turn's listener used, kept while the session's turns continue: mine for this session,
+        kept for every session's (mine among them). A tag no prompt holds now still never crosses."""
+        mine, kept = {"0c03"}, {"0c03", "0d04"}  # 0d04: another session's earlier message
+        cases = [
+            (Reply("0c03 run it"), [MINE], ME, Take(Reply("run it"), None)),  # my earlier tag
+            (Reply("[0c03] run it"), [OLD, MINE, NEW], OTHER, Take(Reply("run it"), None)),
+            (Reply("0d04 run it"), [MINE], ME, SKIP),  # the other session's earlier tag, though I am alone
+            (Reply("0d04 run it"), [MINE, NEW], ME, SKIP),  # and no hint either: it names a session
+            (Reply(f"{OTHER} y"), [MINE, NEW], ME, SKIP),  # a live tag wins
+        ]
+        for reply, live, latest, want in cases:
+            with self.subTest(reply=reply, live=[w.tag for w in live], latest=latest):
+                self.assertEqual(route(reply, ME, SENT, live, latest, mine, kept), want)
+        unkept = Reply("0d04 run it")  # a tag nobody keeps is plain text, as before
+        self.assertEqual(route(unkept, ME, SENT, [MINE], ME, mine, set()), Take(unkept, None))
+
 
 class FormsTest(unittest.TestCase):
     def test_decide(self):
