@@ -24,7 +24,7 @@ class Registry(Protocol):
     """The prompts waiting for the owner, shared by every session on the Mac."""
 
     def claim(self, summary: str, ttl: float) -> str:
-        """Register a prompt for ttl seconds under a tag no waiting prompt holds; return the tag."""
+        """Register a prompt for ttl seconds under a tag no waiting prompt holds or session keeps; return it."""
 
     def release(self, tag: str) -> None:
         """The prompt is done."""
@@ -37,6 +37,16 @@ class Registry(Protocol):
 
     def mark_latest(self, tag: str) -> None:
         """Record the tag of the message about to be sent."""
+
+    def keep(self, session: str, tag: str, ts: int) -> None:
+        """Keep a message a session's finished turn sent, so its later turns take replies to it. Until the
+        session forgets, no claim returns the tag."""
+
+    def threads(self) -> dict:
+        """The messages each session keeps, by session: a list of (tag, timestamp), oldest first."""
+
+    def forget(self, session: str) -> None:
+        """The session's turns no longer continue from Signal: drop the messages it keeps."""
 
 
 class Journal(Protocol):

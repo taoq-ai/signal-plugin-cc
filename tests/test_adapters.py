@@ -117,6 +117,30 @@ class FilesTest(Base):
         registry.mark_latest("bbbb")
         self.assertEqual(([w.tag for w in registry.waiting()], registry.latest()), (["bbbb"], "bbbb"))
 
+    def test_a_session_keeps_its_earlier_messages_until_forgotten_and_no_claim_takes_their_tags(self):
+        registry = FileRegistry(self.home)
+        registry.keep("s1", "aaaa", 1001)
+        registry.keep("s1", "bbbb", 1005)
+        registry.keep("s2", "cccc", 1007)
+        self.assertEqual(registry.threads(), {"s1": [("aaaa", 1001), ("bbbb", 1005)], "s2": [("cccc", 1007)]})
+        drawn = iter(["aaaa", "cccc", "dddd"])
+        with mock.patch.object(files.secrets, "token_hex", lambda n: next(drawn)):
+            self.assertEqual(registry.claim("x", 60), "dddd")
+        registry.forget("s1")
+        registry.forget("s3")  # never kept anything
+        self.assertEqual(registry.threads(), {"s2": [("cccc", 1007)]})
+
+    def test_a_thread_left_for_a_day_is_dropped_and_a_damaged_line_skipped(self):
+        registry = FileRegistry(self.home)
+        registry.keep("s1", "aaaa", 1001)
+        with (self.home / "threads" / "s1").open("a") as f:
+            f.write("not a message\n")
+        registry.keep("s2", "bbbb", 1002)
+        day_ago = time.time() - files.KEEP - 1
+        os.utime(self.home / "threads" / "s2", (day_ago, day_ago))
+        registry.claim("x", 60)  # cleans up, as for expired claims
+        self.assertEqual(registry.threads(), {"s1": [("aaaa", 1001)]})
+
     def test_the_journal_appends_one_timed_json_line_per_entry(self):
         journal = FileJournal(self.home / "new")  # the home may not exist yet
         journal.record({"kind": "permission", "outcome": "answered"})
@@ -404,6 +428,7 @@ class PrivateHomeTest(Base):
         FileRegistry(home).mark_latest("abcd")
         AwaySwitch(home).set(True)
         Listeners(home).set("s1", 123)
+        FileRegistry(home).keep("s1", "abcd", 1001)
         lock = DeskLock(home)
         lock.acquire()
         lock.release()
@@ -418,7 +443,7 @@ class PrivateHomeTest(Base):
         self.assertEqual(stat.S_IMODE(home.stat().st_mode), 0o700)
         self.assertEqual({p for p in modes}, {"relay.log", "pending", "pending/" + next(home.glob("pending/*")).name,
                                               "last", "away", "listeners", "listeners/s1.pid", "desk.lock",
-                                              "daemon.log"})
+                                              "daemon.log", "threads", "threads/s1"})
         self.assertEqual({p: m for p, m in modes.items() if m != (0o700 if (home / p).is_dir() else 0o600)}, {})
 
     def test_an_existing_home_left_open_is_tightened(self):
@@ -434,8 +459,9 @@ class PrivateHomeTest(Base):
         for name in ("relay.log", "last", "away", "desk.lock", "daemon.log"):
             (outside / name).write_text("kept")
             (home / name).symlink_to(outside / name)
-        (outside / "pending").mkdir()
-        (home / "pending").symlink_to(outside / "pending")
+        for folder in ("pending", "threads"):
+            (outside / folder).mkdir()
+            (home / folder).symlink_to(outside / folder)
         (outside / "listeners").mkdir()
         (outside / "listeners" / "s1.pid").write_text("kept")
         (home / "listeners").mkdir(mode=0o700)
@@ -445,6 +471,7 @@ class PrivateHomeTest(Base):
         self.assertIn("relay.log", err.getvalue())
         writes = [lambda: FileRegistry(home).claim("waiting", 60), lambda: FileRegistry(home).mark_latest("abcd"),
                   lambda: AwaySwitch(home).set(True), lambda: Listeners(home).set("s1", 123),
+                  lambda: FileRegistry(home).keep("s1", "abcd", 1001), lambda: FileRegistry(home).forget("s1"),
                   lambda: DeskLock(home).acquire(), lambda: processes.spawn("desk", home / "daemon.log"),
                   lambda: SignalCli(replace(self.cfg, home=home)).start()]
         with mock.patch.object(processes.subprocess, "Popen") as spawned, \

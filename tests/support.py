@@ -59,6 +59,7 @@ class FakeRegistry:
         self.expires = {}  # tag -> when its claim lapses; others never do
         self.last = ""
         self.n = 0
+        self.kept = {}  # session -> [(tag, ts)] of its earlier turns' messages
 
     def claim(self, summary, ttl):
         self.n += 1
@@ -78,6 +79,15 @@ class FakeRegistry:
 
     def mark_latest(self, tag):
         self.last = tag
+
+    def keep(self, session, tag, ts):
+        self.kept.setdefault(session, []).append((tag, ts))
+
+    def threads(self):
+        return {session: list(messages) for session, messages in self.kept.items()}
+
+    def forget(self, session):
+        self.kept.pop(session, None)
 
 
 class FakeJournal:
