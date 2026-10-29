@@ -1,5 +1,5 @@
 {
-  "name": "signal",
+  "name": "signal-relay",
   "version": "0.2.0",
   "license": "MIT",
   "description": "Answer Claude Code permission prompts and questions from Signal while you're away from your Mac.",
