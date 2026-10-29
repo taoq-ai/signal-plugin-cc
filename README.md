@@ -97,9 +97,12 @@ lists the waiting prompts.
 ## Security
 
 Anyone who can send messages as `owner` can approve tool calls and plans in your sessions. Keep registration
-lock on for your number (and the bot's). Plans are relayed: their text goes to Signal, and a vote for
-"auto-accept edits" puts that session in accept-edits mode, so its file edits stop asking. Every other approval
-from Signal keeps the per-edit prompts.
+lock on for your number (and the bot's).
+
+Up to 0.2.0, plan approval (ExitPlanMode) was never relayed and stayed on the Mac. Since 0.3.0 plans are relayed
+while you're away: their text goes to Signal, and a vote for "auto-accept edits" puts that session in
+accept-edits mode, so its file edits stop asking. Every other approval from Signal keeps the per-edit prompts.
+There is no setting to keep plans on the Mac only.
 
 ## Limits
 

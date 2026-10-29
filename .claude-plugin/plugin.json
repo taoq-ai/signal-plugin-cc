@@ -1,8 +1,8 @@
 {
   "name": "signal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
-  "description": "Answer Claude Code permission prompts and questions from Signal while you're away from your Mac.",
+  "description": "Answer Claude Code permission prompts, questions and plan approval from Signal while you're away from your Mac.",
   "author": {
     "name": "TaoQ AI Labs"
   }

@@ -192,6 +192,12 @@ class HooksTest(Base):
         [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
         self.assertEqual((line["kind"], line["outcome"]), ("plan", "answered"))
 
+    def test_ask_user_question_is_left_to_the_question_hook(self):
+        qs = {"questions": [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]}]}
+        self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "AskUserQuestion", "cwd": "/x/proj",
+                                                      "tool_input": qs}))
+        self.assertEqual(StubDaemon.calls, [])
+
     def test_the_log_holds_the_outcome_but_no_message_text_or_number(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {
             "message": "\N{THUMBS UP SIGN}", "quote": {"id": ts}}})
