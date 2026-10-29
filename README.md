@@ -84,7 +84,7 @@ a finished turn is not sent, because nobody can continue it; permission prompts 
 
    ```
    /plugin marketplace add taoq-ai/signal-plugin-cc
-   /plugin install signal@signal-plugin-cc
+   /plugin install signal-relay@signal-plugin-cc
    ```
 
 5. Start a new session. It starts the signal-cli daemon if it isn't running (log in
