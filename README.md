@@ -100,7 +100,8 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 - A session that finished more than `wait` seconds (5 minutes) before you left the Mac doesn't write to you;
   it assumes you saw its result. Closed sessions can't be reached.
 - While a prompt waits on Signal, the Mac doesn't show it; touching the keyboard or mouse hands it back.
-- Idle detection is macOS only. Elsewhere prompts stay at the computer unless you send `away`.
+- Idle detection is macOS only. Since 0.2.0, prompts elsewhere stay at the computer until you send `away`;
+  before, every prompt went to Signal first. The same holds on a Mac whose idle time can't be read.
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.
 - Signal deregisters accounts that stay unused for a long time; keep at least one session running now and then.
 

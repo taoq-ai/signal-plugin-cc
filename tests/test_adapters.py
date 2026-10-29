@@ -198,8 +198,20 @@ class HooksTest(Base):
         switch.set(True)
         hooks.quiet(self.cfg, {"hook_event_name": "SessionEnd", "session_id": "s1"})
         self.assertTrue(switch.on())
-        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1"})
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "run it"})
         self.assertFalse(switch.on())
+
+    def test_a_turn_woken_from_signal_leaves_the_switch_on(self):
+        switch = AwaySwitch(self.home)
+        switch.set(True)
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER,
+                                          "dataMessage": {"message": "go on", "quote": {"id": ts}}})
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
+        wake = f"<task-notification>Stop hook feedback:\n{err.getvalue()}</task-notification>"
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": wake})
+        self.assertTrue(switch.on())
 
 
 class ConfigTest(unittest.TestCase):
