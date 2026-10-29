@@ -8,6 +8,7 @@ from ..adapters import processes
 from ..app import desk
 from ..app.conversation import continue_session
 from ..domain.forms import ContinueForm, PermissionForm, QuestionForm
+from ..domain.model import AT_MAC, CLOSED
 from . import wiring
 
 NOT_RELAYED = ("AskUserQuestion", "ExitPlanMode")  # question() answers the one; plan approval stays on the Mac
@@ -41,12 +42,15 @@ def question(cfg, hook):
 
 def quiet(cfg, hook):
     """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it.
-    A prompt typed at the Mac also turns the away switch off; a turn woken from Signal does not."""
+    A prompt typed at the Mac also turns the away switch off; a turn woken from Signal does not. The listener
+    learns why it stops, so a message still waiting on Signal is told the Mac took over or the session closed."""
     listeners, session = wiring.listeners(cfg), session_id(hook)
+    event = hook.get("hook_event_name")
+    typed = event == "UserPromptSubmit" and WOKEN not in hook.get("prompt", "")
     pid = listeners.get(session)
     listeners.clear(session)
-    processes.stop(pid)
-    if hook.get("hook_event_name") == "UserPromptSubmit" and WOKEN not in hook.get("prompt", ""):
+    processes.stop(pid, AT_MAC if typed else CLOSED if event == "SessionEnd" else None)
+    if typed:
         wiring.presence(cfg).set_switch(False)
 
 

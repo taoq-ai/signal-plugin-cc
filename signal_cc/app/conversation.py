@@ -61,6 +61,15 @@ class Conversation:
                 except RuntimeError:
                     break  # the text message still takes replies
             return self._collect(form, tag, sent, replies, time.time() + wait, leave_on_return, end)
+        except SystemExit as stopped:  # hooks.quiet: tell Signal if the Mac took over a prompt still waiting
+            why = getattr(stopped, "why", None)
+            if why and sent and end["outcome"] == "error":
+                end["outcome"] = why
+                try:
+                    self.say(None, texts.tagged(tag, texts.STOPPED[why]))
+                except (OSError, RuntimeError):
+                    pass  # the listener exits either way
+            raise
         finally:
             self.registry.release(tag)
             for ts, poll in sent.items():
