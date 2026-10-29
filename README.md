@@ -105,6 +105,32 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.
 - Signal deregisters accounts that stay unused for a long time; keep at least one session running now and then.
 
+## Relay log
+
+Each prompt sent to Signal adds one JSON line to `relay.log` in the config home (`$SIGNAL_CC_HOME` when set,
+otherwise `~/.config/signal-plugin-cc`) when it ends. A prompt line has the keys `time`, `kind` (`permission`,
+`question`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
+
+- `answered`, `timed out`, `back at the Mac` or `stream ended`;
+- `quieted`: a finished session stopped listening because you typed at the Mac, a new turn ended or the
+  session closed;
+- `send failed`: the prompt's message could not be sent;
+- `error`: anything else, such as an unreachable daemon.
+
+A hook that fails adds a line with the keys `time`, `handler`, `outcome` (`error`) and `error` (the exception
+type). A prompt that fails therefore gives two lines: one with `kind` and one with `handler`. Count prompts
+by the lines with `kind`. The log never holds message text or phone numbers, stays on your Mac and is not
+rotated. Prompts shown at the Mac are not logged.
+
+```json
+{"time": "2026-10-29T09:12:03Z", "kind": "permission", "tag": "a3f1", "session": "6c1e...", "outcome": "answered", "waited": 41.2}
+{"time": "2026-10-29T09:20:45Z", "handler": "permission", "outcome": "error", "error": "ConnectionRefusedError"}
+```
+
+If a prompt never reached you or an answer never reached the session, open a
+[relay failure issue](https://github.com/taoq-ai/signal-plugin-cc/issues/new?template=relay-failure.md)
+(label `relay-failure`) with the log lines around it.
+
 ## Architecture
 
 Ports and adapters. Each layer imports only from the layers above it in this list, and
@@ -113,9 +139,9 @@ Ports and adapters. Each layer imports only from the layers above it in this lis
 | Layer | Holds |
 |---|---|
 | `signal_cc/domain` | The rules, with no I/O: which prompt a reply belongs to (`routing`), how replies read as answers (`forms`), what the relay says (`texts`). |
-| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`. |
+| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`, `Journal`. |
 | `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`, `away` and `back`. |
-| `signal_cc/adapters` | signal-cli over HTTP, state files under the config home (the away switch among them), macOS idle time, the relay's processes. |
+| `signal_cc/adapters` | signal-cli over HTTP, state files and the relay log under the config home (the away switch among them), macOS idle time, the relay's processes. |
 | `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks and builds adapters. |
 
 Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.
