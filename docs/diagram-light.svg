@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+<title id="title">signal-plugin-cc: answer Claude Code from Signal</title>
+<desc id="desc">Claude Code sessions on your Mac ask for permission, ask questions or finish a turn. While you are away, the plugin's hooks send each one through a local signal-cli daemon to your Note to Self, where you tap a reaction or a poll, or reply. Your answer goes back to the session that asked, and a reply to a finished turn wakes that session with your message.</desc>
+<defs><marker id="m-935600" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#935600"/></marker><marker id="m-00C9A7" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#00C9A7"/></marker></defs>
+<rect width="1200" height="640" rx="28" fill="#F4FAF8"/>
+<text x="40" y="54" fill="#183B37" font-size="38" font-weight="700">signal<tspan fill="#00735F">-plugin-cc</tspan></text>
+<text x="40" y="84" fill="#42615C" font-size="16">Answer Claude Code from Signal while you're away from the Mac.</text>
+<path d="M960 66L1010 66" stroke="#00C9A7" stroke-width="2" fill="none" marker-end="url(#m-00C9A7)"/>
+<text x="1020" y="70" fill="#42615C" font-size="12">to you</text>
+<path d="M960 90L1010 90" stroke="#935600" stroke-width="2" fill="none" marker-end="url(#m-935600)"/>
+<text x="1020" y="94" fill="#42615C" font-size="12">from you</text>
+<text x="200" y="140" fill="#42615C" font-size="12" font-weight="700" text-anchor="middle">YOUR MAC</text>
+<text x="600" y="140" fill="#42615C" font-size="12" font-weight="700" text-anchor="middle">IN THE BACKGROUND, ON THE MAC</text>
+<text x="1010" y="140" fill="#42615C" font-size="12" font-weight="700" text-anchor="middle">YOUR PHONE</text>
+<rect x="40" y="160" width="320" height="330" rx="20" fill="#FFFFFF" stroke="#42615C" stroke-opacity="0.35"/>
+<text x="200" y="192" fill="#183B37" font-size="15" font-weight="700" text-anchor="middle">Claude Code sessions</text>
+<rect x="64" y="212" width="272" height="56" rx="14" fill="#F4FAF8" stroke="#00C9A7" stroke-width="1.5"/><text x="84" y="235" fill="#183B37" font-size="14" font-weight="700">ziran-paper</text><text x="84" y="255" fill="#42615C" font-size="12">wants to run: rm -rf build</text>
+<rect x="64" y="282" width="272" height="56" rx="14" fill="#F4FAF8" stroke="#00C9A7" stroke-width="1.5"/><text x="84" y="305" fill="#183B37" font-size="14" font-weight="700">wuwei</text><text x="84" y="325" fill="#42615C" font-size="12">asks: which plan?</text>
+<rect x="64" y="352" width="272" height="56" rx="14" fill="#F4FAF8" stroke="#00C9A7" stroke-width="1.5"/><text x="84" y="375" fill="#183B37" font-size="14" font-weight="700">signal-plugin-cc</text><text x="84" y="395" fill="#42615C" font-size="12">finished: 18 tests pass</text>
+<text x="200" y="448" fill="#42615C" font-size="12" text-anchor="middle">desktop app, terminal or IDE</text>
+<text x="200" y="468" fill="#42615C" font-size="12" text-anchor="middle">no CLI flag, nothing to start by hand</text>
+<rect x="440" y="200" width="320" height="118" rx="18" fill="#FFFFFF" stroke="#00C9A7" stroke-width="2"/>
+<text x="600" y="228" fill="#183B37" font-size="15" font-weight="700" text-anchor="middle">signal-plugin-cc hooks</text>
+<text x="600" y="252" fill="#42615C" font-size="12" text-anchor="middle">PermissionRequest → allow or deny</text>
+<text x="600" y="272" fill="#42615C" font-size="12" text-anchor="middle">AskUserQuestion → the answers</text>
+<text x="600" y="292" fill="#42615C" font-size="12" text-anchor="middle">Stop (asyncRewake) → wake with your reply</text>
+<path d="M585 322L585 366" stroke="#00C9A7" stroke-width="2" fill="none" marker-end="url(#m-00C9A7)"/>
+<path d="M615 368L615 324" stroke="#935600" stroke-width="2" fill="none" marker-end="url(#m-935600)"/>
+<rect x="480" y="372" width="240" height="60" rx="18" fill="#FFFFFF" stroke="#00C9A7" stroke-width="2"/>
+<text x="600" y="398" fill="#183B37" font-size="15" font-weight="700" text-anchor="middle">signal-cli daemon</text>
+<text x="600" y="418" fill="#42615C" font-size="12" text-anchor="middle">linked device · localhost only</text>
+<path d="M362 246L436 246" stroke="#00C9A7" stroke-width="2" fill="none" marker-end="url(#m-00C9A7)"/>
+<text x="399" y="238" fill="#42615C" font-size="11" text-anchor="middle">asks</text>
+<path d="M438 288L364 288" stroke="#935600" stroke-width="2" fill="none" marker-end="url(#m-935600)"/>
+<text x="401" y="306" fill="#42615C" font-size="11" text-anchor="middle">answer</text>
+<path d="M722 390L854 390" stroke="#00C9A7" stroke-width="2" fill="none" marker-end="url(#m-00C9A7)"/>
+<text x="788" y="380" fill="#42615C" font-size="11" text-anchor="middle">Note to Self, notifies</text>
+<path d="M854 414L722 414" stroke="#935600" stroke-width="2" fill="none" marker-end="url(#m-935600)"/>
+<text x="788" y="432" fill="#42615C" font-size="11" text-anchor="middle">tap, react, quote, reply</text>
+<rect x="860" y="150" width="300" height="380" rx="34" fill="#FFFFFF" stroke="#183B37" stroke-width="2"/>
+<rect x="975" y="160" width="70" height="6" rx="3" fill="#42615C" opacity="0.4"/>
+<text x="1010" y="190" fill="#183B37" font-size="13" font-weight="700" text-anchor="middle">Note to Self</text>
+<path d="M876 202H1144" stroke="#42615C" stroke-opacity="0.3"/>
+<rect x="878" y="214" width="232" height="48" rx="14" fill="#E3F2EE"/><text x="892" y="234" fill="#183B37" font-size="12" font-weight="700">[a3f1] Bash in ziran-paper</text><text x="892" y="252" fill="#183B37" font-size="12">rm -rf build</text>
+<circle cx="1098" cy="262" r="13" fill="#FFFFFF" stroke="#42615C" stroke-opacity="0.4"/>
+<text x="1098" y="267" fill="#183B37" font-size="13" text-anchor="middle">👍</text>
+<rect x="878" y="282" width="232" height="82" rx="14" fill="#E3F2EE"/><text x="892" y="302" fill="#183B37" font-size="12" font-weight="700">[7c2e] wuwei: which plan?</text>
+<rect x="892" y="310" width="204" height="20" rx="10" fill="#00C9A7" fill-opacity="0.35"/>
+<text x="904" y="324" fill="#183B37" font-size="11">✓ Plan A (Recommended)</text>
+<rect x="892" y="336" width="204" height="20" rx="10" fill="none" stroke="#42615C" stroke-opacity="0.5"/>
+<text x="904" y="350" fill="#183B37" font-size="11">Plan B</text>
+<rect x="878" y="380" width="232" height="48" rx="14" fill="#E3F2EE"/><text x="892" y="400" fill="#183B37" font-size="12" font-weight="700">[b91d] signal-plugin-cc</text><text x="892" y="418" fill="#183B37" font-size="12">Done; 18 tests pass.</text>
+<rect x="964" y="444" width="180" height="62" rx="14" fill="#00C9A7"/>
+<rect x="976" y="454" width="156" height="20" rx="6" fill="#0B2E29" fill-opacity="0.12"/>
+<text x="984" y="468" fill="#0B2E29" font-size="10">[b91d] Done; 18 tests…</text>
+<text x="976" y="494" fill="#0B2E29" font-size="12" font-weight="700">run the tests too</text>
+<circle cx="46" cy="576" r="5" fill="#00C9A7"/>
+<text x="60" y="581" fill="#183B37" font-size="14" font-weight="700">Only while you're away</text>
+<text x="60" y="601" fill="#42615C" font-size="13">touch the Mac and the prompt comes back to it</text>
+<circle cx="446" cy="576" r="5" fill="#00C9A7"/>
+<text x="460" y="581" fill="#183B37" font-size="14" font-weight="700">Replies never cross sessions</text>
+<text x="460" y="601" fill="#42615C" font-size="13">quote, react, tag, or the only one waiting</text>
+<circle cx="846" cy="576" r="5" fill="#00C9A7"/>
+<text x="860" y="581" fill="#183B37" font-size="14" font-weight="700">No reply in time?</text>
+<text x="860" y="601" fill="#42615C" font-size="13">the Mac asks as usual</text>
+</svg>

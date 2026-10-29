@@ -1,3 +1,9 @@
+<p align="center"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/diagram-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/diagram-light.svg">
+    <img src="docs/diagram-light.svg" alt="Claude Code sessions on your Mac ask for permission, ask questions or finish a turn. While you are away, the plugin's hooks send each one through a local signal-cli daemon to your Note to Self, where you tap a reaction or a poll, or reply. Your answer goes back to the session that asked." width="100%">
+</picture></p>
+
 # signal-plugin-cc
 
 Answer Claude Code's permission prompts and questions from Signal when you're away from your Mac.
@@ -96,3 +102,5 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+The diagram is drawn by `docs/diagram.py`; edit it and run `python3 docs/diagram.py`.
