@@ -7,6 +7,7 @@ from signal_cc.app import conversation, desk
 from signal_cc.app.conversation import Conversation, continue_session
 from signal_cc.domain import texts
 from signal_cc.domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm
+from signal_cc.domain.model import AT_MAC, CLOSED, Stopped
 
 BASH = PermissionForm("Bash", {"command": "ls"}, "proj")
 OTHER = "0fff"
@@ -214,6 +215,69 @@ class ContinueTest(unittest.TestCase):
         c = conv(m, presence=FakePresence(away=False))
         self.assertIsNone(continue_session(c, ContinueForm("Done.", "proj"), grace=0.2, wait=10))
         self.assertEqual(m.sent, [])
+
+
+class StoppedTest(unittest.TestCase):
+    """hooks.quiet stops a waiting listener; the listener tells Signal when the Mac took over."""
+
+    def setUp(self):
+        conversation.SETTLE, conversation.POLL = 0.3, 0.05
+
+    def stop_while_waiting(self, why):
+        m, registry, journal = FakeMessenger(), FakeRegistry(), FakeJournal()
+        m.replies.get = lambda timeout: (_ for _ in ()).throw(Stopped(why))  # what processes raises
+        with self.assertRaises(SystemExit) as stopped:
+            continue_session(conv(m, registry, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
+        self.assertEqual(stopped.exception.code, 0)  # exits quietly: the session is not woken
+        self.assertEqual(registry.waiting(), [])
+        return m.sent[1:], journal.lines
+
+    def test_a_prompt_typed_at_the_mac_sends_one_tagged_notice(self):
+        sent, [line] = self.stop_while_waiting(AT_MAC)
+        self.assertEqual(sent, [f"[0001] {texts.STOPPED[AT_MAC]}"])
+        self.assertEqual(line["outcome"], "answered at the Mac")
+
+    def test_a_closed_session_says_so(self):
+        sent, [line] = self.stop_while_waiting(CLOSED)
+        self.assertEqual(sent, [f"[0001] {texts.STOPPED[CLOSED]}"])
+        self.assertIn("closed", texts.STOPPED[CLOSED])
+        self.assertEqual(line["outcome"], "session closed")
+
+    def test_a_listener_replaced_by_a_new_turn_sends_nothing(self):
+        sent, [line] = self.stop_while_waiting(None)
+        self.assertEqual((sent, line["outcome"]), ([], "quieted"))
+
+    def test_a_prompt_already_answered_or_timed_out_gets_no_notice(self):
+        for name, script, wait in [("answered", (quoting("go on"),), 10), ("timed out", (), 0.3)]:
+            with self.subTest(outcome=name):
+                m, journal = FakeMessenger(*script), FakeJournal()
+                send = m.send
+
+                def stop_on_the_last_word(text):  # the receipt or timeout went out; then quiet() lands
+                    ts = send(text)
+                    if texts.CHECK in text or texts.TIMED_OUT in text:
+                        raise Stopped(AT_MAC)
+                    return ts
+                m.send = stop_on_the_last_word
+                with self.assertRaises(SystemExit):
+                    continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=wait)
+                self.assertEqual(len(m.sent), 2)
+                self.assertNotIn(texts.STOPPED[AT_MAC], m.sent[-1])
+                self.assertEqual(journal.lines[0]["outcome"], name)
+
+    def test_a_notice_that_cannot_be_sent_still_ends_quietly(self):
+        for error in (OSError("connection refused"), RuntimeError("daemon refused")):  # signal_cli raises both
+            with self.subTest(error=type(error).__name__):
+                m, journal = FakeMessenger(), FakeJournal()
+
+                def stop_then_fail(timeout):
+                    m.send = lambda text: (_ for _ in ()).throw(error)
+                    raise Stopped(AT_MAC)
+                m.replies.get = stop_then_fail
+                with self.assertRaises(SystemExit) as stopped:
+                    continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
+                self.assertEqual(stopped.exception.code, 0)
+                self.assertEqual(journal.lines[0]["outcome"], "answered at the Mac")
 
 
 class DeskTest(unittest.TestCase):

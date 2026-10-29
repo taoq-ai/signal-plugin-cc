@@ -298,6 +298,46 @@ class HooksTest(Base):
         [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
         self.assertEqual((line["kind"], line["session"], line["outcome"]), ("continue", "s1", "quieted"))
 
+    def test_a_listener_stopped_by_a_prompt_at_the_mac_tells_signal(self):
+        sigs = (signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2)  # listen installs a handler for each
+        before = {sig: signal.getsignal(sig) for sig in sigs}
+        threading.Timer(1.0, lambda: os.kill(os.getpid(), signal.SIGUSR1)).start()  # what quiet sends it
+        try:
+            with self.assertRaises(SystemExit) as stopped:
+                hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
+        finally:
+            for sig, handler in before.items():
+                signal.signal(sig, handler)
+        self.assertEqual(stopped.exception.code, 0)
+        sends = [params["message"] for method, params in StubDaemon.calls if method == "send"]
+        self.assertEqual(len(sends), 2)
+        tag = sends[0][1:5]
+        self.assertTrue(sends[1].startswith(f"[{tag}] Answered at the Mac"))
+        [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
+        self.assertEqual((line["tag"], line["outcome"]), (tag, "answered at the Mac"))
+
+    def test_quiet_tells_the_listener_why_it_stops(self):
+        catch = ("import signal, sys, time\n"
+                 "for s in (signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2):\n"
+                 "    signal.signal(s, lambda n, f: (print(n, flush=True), sys.exit()))\n"
+                 "print('ready', flush=True)\ntime.sleep(30)")
+        cases = [({"hook_event_name": "UserPromptSubmit", "prompt": "run it"}, signal.SIGUSR1),
+                 ({"hook_event_name": "SessionEnd"}, signal.SIGUSR2),
+                 ({"hook_event_name": "UserPromptSubmit", "prompt": f"{hooks.WOKEN}\ngo on"}, signal.SIGTERM),
+                 ({"hook_event_name": "Stop"}, signal.SIGTERM)]
+        for hook, expected in cases:
+            with self.subTest(hook=hook["hook_event_name"], expected=expected.name):
+                fake = subprocess.Popen([sys.executable, "-c", catch, "relay.py"], stdout=subprocess.PIPE, text=True)
+                try:
+                    self.assertEqual(fake.stdout.readline().strip(), "ready")
+                    Listeners(self.home).set("s1", fake.pid)
+                    hooks.quiet(self.cfg, {**hook, "session_id": "s1"})
+                    self.assertEqual(int(fake.stdout.readline()), expected)
+                finally:
+                    fake.kill()
+                    fake.wait()
+                    fake.stdout.close()
+
     def test_the_desk_answers_status(self):
         registry = FileRegistry(self.home)
         registry.claim("Bash in other:", 60)
