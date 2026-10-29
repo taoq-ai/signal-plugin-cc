@@ -1,8 +1,14 @@
 """The composition root: the one place that picks and builds adapters for the ports."""
 from ..adapters.files import AwaySwitch, DeskLock, FileGathering, FileJournal, FileRegistry, Listeners
+from ..adapters import private
 from ..adapters.macos import MacPresence
 from ..adapters.signal_cli import SignalCli
 from ..app.conversation import Conversation
+
+
+def home(cfg):
+    """Check the config home before any hook runs: the user's own, and private."""
+    private.home(cfg.home)
 
 
 def daemon(cfg):
