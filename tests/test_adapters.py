@@ -1,7 +1,9 @@
 """The adapters, and the hooks end to end, against a stub signal-cli daemon and real files."""
 import contextlib
 import io
+import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,7 +16,7 @@ from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
 from signal_cc.adapters import files, macos, processes
-from signal_cc.adapters.files import AwaySwitch, DeskLock, FileRegistry, Listeners
+from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
@@ -114,6 +116,22 @@ class FilesTest(Base):
         registry.mark_latest("bbbb")
         self.assertEqual(([w.tag for w in registry.waiting()], registry.latest()), (["bbbb"], "bbbb"))
 
+    def test_the_journal_appends_one_timed_json_line_per_entry(self):
+        journal = FileJournal(self.home / "new")  # the home may not exist yet
+        journal.record({"kind": "permission", "outcome": "answered"})
+        journal.record({"handler": "listen", "outcome": "error", "error": "OSError"})
+        lines = [json.loads(line) for line in (self.home / "new" / "relay.log").read_text().splitlines()]
+        self.assertEqual([{k: v for k, v in line.items() if k != "time"} for line in lines],
+                         [{"kind": "permission", "outcome": "answered"},
+                          {"handler": "listen", "outcome": "error", "error": "OSError"}])
+        self.assertRegex(lines[0]["time"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
+    def test_a_journal_that_cannot_write_never_breaks_the_relay(self):
+        (self.home / "relay.log").mkdir()  # not a writable file
+        with contextlib.redirect_stderr(err := io.StringIO()):
+            FileJournal(self.home).record({"outcome": "answered"})
+        self.assertIn("relay.log", err.getvalue())
+
     def test_one_desk_lock_at_a_time(self):
         first, second = DeskLock(self.home), DeskLock(self.home)
         self.assertTrue(first.acquire())
@@ -210,6 +228,18 @@ class HooksTest(Base):
         self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
         self.assertIn("Bash in proj", StubDaemon.calls[0][1]["message"])
 
+    def test_the_log_holds_the_outcome_but_no_message_text_or_number(self):
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {
+            "message": "\N{THUMBS UP SIGN}", "quote": {"id": ts}}})
+        hooks.permission(self.cfg, {"tool_name": "Bash", "cwd": "/x/proj", "session_id": "s9",
+                                    "tool_input": {"command": "echo hush-7f3a", "description": "say hush"}})
+        self.assertIn("hush-7f3a", StubDaemon.calls[0][1]["message"])  # it was sent
+        log = (self.home / "relay.log").read_text()
+        [line] = [json.loads(row) for row in log.splitlines()]
+        self.assertEqual((line["kind"], line["session"], line["outcome"]), ("permission", "s9", "answered"))
+        for secret in ("hush", "proj", "Bash", OWNER, OWNER.lstrip("+"), self.cfg.bot.lstrip("+")):
+            self.assertNotIn(secret, log)
+
     def test_listen_wakes_the_session_with_the_reply(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER,
                                           "dataMessage": {"message": "run the tests too", "quote": {"id": ts}}})
@@ -229,6 +259,18 @@ class HooksTest(Base):
                                       "stop_hook_active": False})
         self.assertLess(time.monotonic() - began, 1)
         self.assertEqual((out, StubDaemon.calls, Listeners(self.home).get("s1")), (None, [], None))
+
+    def test_a_listener_quieted_mid_wait_is_logged_as_quieted(self):
+        """UserPromptSubmit and SessionEnd stop a waiting listener with SIGTERM: a normal end, not an error."""
+        before = signal.getsignal(signal.SIGTERM)
+        threading.Timer(1.0, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+        try:
+            with self.assertRaises(SystemExit):
+                hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
+        finally:
+            signal.signal(signal.SIGTERM, before)
+        [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
+        self.assertEqual((line["kind"], line["session"], line["outcome"]), ("continue", "s1", "quieted"))
 
     def test_the_desk_answers_status(self):
         registry = FileRegistry(self.home)
@@ -314,6 +356,26 @@ class ConfigTest(unittest.TestCase):
                                          input='{"tool_name": "Bash", "tool_input": {}}', capture_output=True,
                                          text=True, timeout=10)
                     self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
+
+    def test_a_failing_handler_is_logged_and_the_hook_still_exits_quietly(self):
+        # port 1 is closed and signal_cli is missing, so start fails with an OSError and no daemon is touched
+        cases = [("permission", '{"tool_name": "Bash", "tool_input": {"command": "echo hush"', "JSONDecodeError"),
+                 ("start", "{}", "FileNotFoundError"),
+                 ("bogus-hush", "{}", "KeyError")]
+        for handler, stdin, error in cases:
+            with self.subTest(handler=handler), tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "config.json").write_text(json.dumps(
+                    {"owner": OWNER, "port": 1, "signal_cli": str(Path(tmp, "no-signal-cli"))}))
+                run = subprocess.run([sys.executable, str(ROOT / "relay.py"), handler],
+                                     env={"SIGNAL_CC_HOME": tmp, "PATH": "/usr/bin:/bin"},
+                                     input=stdin, capture_output=True, text=True)
+                log = Path(tmp, "relay.log").read_text()
+                self.assertEqual((run.returncode, run.stdout), (0, ""))
+                line = json.loads(log)
+                self.assertEqual({k: v for k, v in line.items() if k != "time"},
+                                 {"handler": handler if handler in ("permission", "start") else "unknown",
+                                  "outcome": "error", "error": error})
+                self.assertNotIn("hush", log)
 
     def test_the_relay_is_the_entry_processes_spawn(self):
         self.assertEqual(processes.RELAY, ROOT / "relay.py")

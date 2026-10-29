@@ -1,6 +1,7 @@
 """The prompts the relay sends, and how each reads replies into an answer.
 
-A form has text (the message), polls (sent beside it), parse(reply, target) and receipt(value).
+A form has kind (what the relay log calls it), text (the message), polls (sent beside it),
+parse(reply, target) and receipt(value).
 parse gets each reply addressed to the prompt, with target the index of the poll it votes in or quotes,
 or None. It returns the answer, PARTIAL while answers are missing, or None for a reply it can't read.
 """
@@ -35,6 +36,7 @@ def pick(question, row):
 
 class PermissionForm:
     """Allow or deny a tool call: a 👍 or 👎 reaction, y, n, or a reason that denies."""
+    kind = "permission"
     polls = ()
 
     def __init__(self, tool, tool_input, project):
@@ -54,6 +56,7 @@ class PermissionForm:
 class QuestionForm:
     """Answer AskUserQuestion: poll votes, replies quoting a question's poll, or lines for the open
     questions, in any order."""
+    kind = "question"
 
     def __init__(self, questions, project):
         self.questions = questions
@@ -95,6 +98,7 @@ class QuestionForm:
 
 class ContinueForm:
     """A finished turn's last message; any reply continues the session."""
+    kind = "continue"
     polls = ()
     LIMIT = 1500
 

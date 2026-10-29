@@ -24,9 +24,12 @@ class FakeMessenger:
         self.sent, self.ended, self.script = [], [], list(script)
         self.replies = queue.Queue()
         self.fail_polls = False
+        self.fail_sends = False
         self.ts = 1000
 
     def _out(self, text):
+        if self.fail_sends:
+            raise OSError("connection refused")
         self.ts += 1
         self.sent.append(text)
         if self.script and texts.CHECK not in text and texts.TIMED_OUT not in text:
@@ -75,6 +78,14 @@ class FakeRegistry:
 
     def mark_latest(self, tag):
         self.last = tag
+
+
+class FakeJournal:
+    def __init__(self):
+        self.lines = []
+
+    def record(self, entry):
+        self.lines.append(entry)
 
 
 class FakePresence:
