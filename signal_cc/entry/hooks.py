@@ -35,7 +35,10 @@ def question(cfg, hook):
 
 
 def quiet(cfg, hook):
-    """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it."""
+    """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it.
+    A prompt typed at the Mac also turns the away switch off."""
+    if hook.get("hook_event_name") == "UserPromptSubmit":
+        wiring.presence(cfg).set_switch(False)
     listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
     pid = listeners.get(session)
     listeners.clear(session)
@@ -79,6 +82,6 @@ def run_desk(cfg, hook=None):
             if daemon.is_up():
                 break
             time.sleep(1)
-        desk.serve(daemon, wiring.registry(cfg))
+        desk.serve(daemon, wiring.registry(cfg), wiring.presence(cfg))
     finally:
         lock.release()

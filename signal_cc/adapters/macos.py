@@ -16,14 +16,27 @@ def idle_seconds():
 
 
 class MacPresence:
-    def __init__(self, idle):
+    def __init__(self, idle, switch):
         self.idle = idle  # seconds without input before the Mac counts as unattended
+        self.switch = switch  # the away switch: on() and set(on)
 
     def away(self):
-        """Idle for self.idle seconds, or idle time unknown (not a Mac): prompts go to Signal."""
+        """The switch is on, or the Mac has been idle for self.idle seconds. Unknown idle time (not a Mac)
+        counts as at the computer."""
+        if self.switch.on():
+            return True
         idle = idle_seconds()
-        return idle is None or idle >= self.idle
+        return idle is not None and idle >= self.idle
 
     def returned(self):
+        """Input in the last few seconds, unless the switch is on."""
+        if self.switch.on():
+            return False
         idle = idle_seconds()
         return idle is not None and idle < RETURNED
+
+    def set_switch(self, on):
+        self.switch.set(on)
+
+    def switch_on(self):
+        return self.switch.on()

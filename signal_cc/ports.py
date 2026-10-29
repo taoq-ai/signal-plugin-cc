@@ -47,3 +47,9 @@ class Presence(Protocol):
 
     def returned(self) -> bool:
         """Just came back (input in the last few seconds)."""
+
+    def set_switch(self, on: bool) -> None:
+        """Turn the away switch on or off; while on, the owner is away whatever the Mac's idle time."""
+
+    def switch_on(self) -> bool:
+        """Whether the away switch is on."""
