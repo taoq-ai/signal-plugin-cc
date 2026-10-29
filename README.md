@@ -22,8 +22,10 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
   change and Claude keeps planning with your reply as feedback.
 - **Conversation:** when a session finishes a turn while you're away, its last message comes to Signal. Reply
   (quote it if several sessions wrote) and the session wakes with your reply as its next instruction, then
-  answers you the same way. Typing at the Mac or closing the session stops it listening, and Signal gets a short
-  notice that replies to that message no longer reach the session.
+  answers you the same way. A turn the session starts itself (a background agent's report) doesn't stop it
+  listening, and a reply to any message it sent since you last typed at the Mac reaches it. Typing at the Mac or
+  closing the session stops it listening, and Signal gets a short notice that replies to that message no longer
+  reach the session.
 
 It only relays while you're away: if your Mac has had keyboard or mouse input in the last 60 seconds, Claude Code
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
@@ -99,7 +101,9 @@ Send `status` at any time to see what is waiting for you and whether the away sw
 Each prompt starts with a tag like `[a3f1]`. A reply never reaches the wrong session: it counts for a prompt only
 when it quotes one of the prompt's messages (swipe to reply), reacts to it, starts with its tag, or is a plain
 reply while that prompt is the only one waiting and the latest message. Any other plain reply gets one hint that
-lists the waiting prompts.
+lists the waiting prompts. A finished session also takes replies to its earlier messages, quoted or tagged, until
+you type at the Mac in it, it closes, or a day passes without a new message from it; no other prompt gets
+those tags meanwhile.
 
 ## Security
 
