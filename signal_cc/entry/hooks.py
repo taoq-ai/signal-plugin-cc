@@ -10,6 +10,7 @@ from ..app.conversation import continue_session
 from ..domain.forms import ContinueForm, PermissionForm, PlanForm, QuestionForm
 from . import wiring
 
+WOKEN = "The owner replied from Signal, away from the Mac (signal-plugin-cc):"  # listen()'s wake, seen by quiet()
 
 
 def project(hook):
@@ -36,11 +37,14 @@ def question(cfg, hook):
 
 
 def quiet(cfg, hook):
-    """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it."""
+    """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it.
+    A prompt typed at the Mac also turns the away switch off; a turn woken from Signal does not."""
     listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
     pid = listeners.get(session)
     listeners.clear(session)
     processes.stop(pid)
+    if hook.get("hook_event_name") == "UserPromptSubmit" and WOKEN not in hook.get("prompt", ""):
+        wiring.presence(cfg).set_switch(False)
 
 
 def listen(cfg, hook):
@@ -57,7 +61,7 @@ def listen(cfg, hook):
     finally:
         listeners.clear(session, os.getpid())
     if reply:
-        print(f"The owner replied from Signal, away from the Mac (signal-plugin-cc):\n{reply}", file=sys.stderr)
+        print(f"{WOKEN}\n{reply}", file=sys.stderr)
         sys.exit(2)
 
 
@@ -80,6 +84,6 @@ def run_desk(cfg, hook=None):
             if daemon.is_up():
                 break
             time.sleep(1)
-        desk.serve(daemon, wiring.registry(cfg))
+        desk.serve(daemon, wiring.registry(cfg), wiring.presence(cfg))
     finally:
         lock.release()

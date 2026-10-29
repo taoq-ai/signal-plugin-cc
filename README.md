@@ -28,6 +28,9 @@ It only relays while you're away: if your Mac has had keyboard or mouse input in
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
 No reply within 5 minutes also hands it back. Without a config file the plugin does nothing.
 
+In a meeting at the Mac? Send `away`: prompts then go to Signal whatever the idle time, and touching the Mac
+doesn't hand them back. Send `back`, or type a prompt at the Mac, to let idle time decide again.
+
 ## Setup
 
 1. Install signal-cli (it brings Java) and qrencode:
@@ -84,7 +87,7 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
 
 ## Several prompts at once
 
-Send `status` at any time to see what is waiting for you.
+Send `status` at any time to see what is waiting for you and whether the away switch is on.
 
 Each prompt starts with a tag like `[a3f1]`. A reply never reaches the wrong session: it counts for a prompt only
 when it quotes one of the prompt's messages (swipe to reply), reacts to it, starts with its tag, or is a plain
@@ -103,7 +106,8 @@ from Signal keeps the per-edit prompts.
 - A session that finished more than `wait` seconds (5 minutes) before you left the Mac doesn't write to you;
   it assumes you saw its result. Closed sessions can't be reached.
 - While a prompt waits on Signal, the Mac doesn't show it; touching the keyboard or mouse hands it back.
-- Idle detection is macOS only. Elsewhere every prompt goes to Signal first, so lower `wait`.
+- Idle detection is macOS only. Since 0.2.0, prompts elsewhere stay at the computer until you send `away`;
+  before, every prompt went to Signal first. The same holds on a Mac whose idle time can't be read.
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.
 - Signal deregisters accounts that stay unused for a long time; keep at least one session running now and then.
 
@@ -116,8 +120,8 @@ Ports and adapters. Each layer imports only from the layers above it in this lis
 |---|---|
 | `signal_cc/domain` | The rules, with no I/O: which prompt a reply belongs to (`routing`), how replies read as answers (`forms`), what the relay says (`texts`). |
 | `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`. |
-| `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`. |
-| `signal_cc/adapters` | signal-cli over HTTP, state files under the config home, macOS idle time, the relay's processes. |
+| `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`, `away` and `back`. |
+| `signal_cc/adapters` | signal-cli over HTTP, state files under the config home (the away switch among them), macOS idle time, the relay's processes. |
 | `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks and builds adapters. |
 
 Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.

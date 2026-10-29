@@ -13,7 +13,7 @@ from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
 from signal_cc.adapters import files, macos, processes
-from signal_cc.adapters.files import DeskLock, FileRegistry, Listeners
+from signal_cc.adapters.files import AwaySwitch, DeskLock, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
 from signal_cc.config import Config
@@ -128,6 +128,26 @@ class FilesTest(Base):
                 p.wait()
 
 
+class PresenceTest(Base):
+    def test_the_switch_overrides_idle_time_and_unknown_idle_means_at_the_mac(self):
+        presence = macos.MacPresence(60, AwaySwitch(self.home))
+        cases = [  # idle seconds, switch -> away, returned
+            (5, False, False, True), (1000, False, True, False), (None, False, False, False),
+            (5, True, True, False), (None, True, True, False)]
+        for idle, on, away, returned in cases:
+            with self.subTest(idle=idle, switch=on):
+                macos.idle_seconds = lambda: idle
+                presence.set_switch(on)
+                self.assertEqual((presence.away(), presence.returned(), presence.switch_on()), (away, returned, on))
+
+    def test_the_switch_is_shared_through_the_config_home(self):
+        AwaySwitch(self.home / "new").set(True)
+        self.assertTrue(AwaySwitch(self.home / "new").on())
+        AwaySwitch(self.home / "new").set(False)
+        AwaySwitch(self.home / "new").set(False)  # already off
+        self.assertFalse(AwaySwitch(self.home / "new").on())
+
+
 class HooksTest(Base):
     def test_permission_end_to_end(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "Y", "quote": {"id": ts}}})
@@ -174,6 +194,41 @@ class HooksTest(Base):
         runner.join(timeout=5)
         self.assertFalse(runner.is_alive())
         self.assertIn("Waiting for you (1)", StubDaemon.calls[0][1]["message"])
+
+    def test_away_from_signal_sends_the_next_prompt_there_though_the_mac_is_in_use(self):
+        macos.idle_seconds = lambda: 5
+        runner = threading.Thread(target=hooks.run_desk, args=(self.cfg,))
+        runner.start()
+        time.sleep(0.5)
+        StubDaemon.push({"sourceNumber": OWNER, "dataMessage": {"message": "away"}})
+        time.sleep(0.3)
+        StubDaemon.events.put(None)
+        runner.join(timeout=5)
+        self.assertIn("Away switch on", StubDaemon.calls[0][1]["message"])
+        StubDaemon.reset()
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "y", "quote": {"id": ts}}})
+        out = hooks.permission(self.cfg, {"tool_name": "Bash", "cwd": "/x/proj", "tool_input": {"command": "ls"}})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
+
+    def test_a_prompt_typed_at_the_mac_turns_the_switch_off_and_session_end_does_not(self):
+        switch = AwaySwitch(self.home)
+        switch.set(True)
+        hooks.quiet(self.cfg, {"hook_event_name": "SessionEnd", "session_id": "s1"})
+        self.assertTrue(switch.on())
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "run it"})
+        self.assertFalse(switch.on())
+
+    def test_a_turn_woken_from_signal_leaves_the_switch_on(self):
+        switch = AwaySwitch(self.home)
+        switch.set(True)
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER,
+                                          "dataMessage": {"message": "go on", "quote": {"id": ts}}})
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
+        wake = f"<task-notification>Stop hook feedback:\n{err.getvalue()}</task-notification>"
+        hooks.quiet(self.cfg, {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": wake})
+        self.assertTrue(switch.on())
 
 
 class ConfigTest(unittest.TestCase):
