@@ -6,6 +6,8 @@
 
 # signal-plugin-cc
 
+[![Tests](https://github.com/taoq-ai/signal-plugin-cc/actions/workflows/tests.yml/badge.svg)](https://github.com/taoq-ai/signal-plugin-cc/actions/workflows/tests.yml)
+
 Answer Claude Code's permission prompts and questions from Signal when you're away from your Mac.
 It works in any Claude Code session (desktop app, terminal, IDE) because it is a set of hooks, not a CLI mode.
 
@@ -78,6 +80,8 @@ No reply within 5 minutes also hands it back. Without a config file the plugin d
 
 ## Several prompts at once
 
+Send `status` at any time to see what is waiting for you.
+
 Each prompt starts with a tag like `[a3f1]`. A reply never reaches the wrong session: it counts for a prompt only
 when it quotes one of the prompt's messages (swipe to reply), reacts to it, starts with its tag, or is a plain
 reply while that prompt is the only one waiting and the latest message. Any other plain reply gets one hint that
@@ -96,6 +100,21 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 - Idle detection is macOS only. Elsewhere every prompt goes to Signal first, so lower `wait`.
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.
 - Signal deregisters accounts that stay unused for a long time; keep at least one session running now and then.
+
+## Architecture
+
+Ports and adapters. Each layer imports only from the layers above it in this list, and
+`tests/test_architecture.py` fails on any import that points outward.
+
+| Layer | Holds |
+|---|---|
+| `signal_cc/domain` | The rules, with no I/O: which prompt a reply belongs to (`routing`), how replies read as answers (`forms`), what the relay says (`texts`). |
+| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`. |
+| `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`. |
+| `signal_cc/adapters` | signal-cli over HTTP, state files under the config home, macOS idle time, the relay's processes. |
+| `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks and builds adapters. |
+
+Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.
 
 ## Development
 

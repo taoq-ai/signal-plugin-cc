@@ -28,10 +28,6 @@ class Config:
     def note_to_self(self):
         return self.account == self.owner
 
-    @property
-    def pending(self):
-        return self.home / "pending"
-
     @classmethod
     def load(cls):
         """The config, or None when it is missing or invalid (the plugin then stays out of the way)."""
