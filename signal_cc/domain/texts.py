@@ -1,4 +1,5 @@
 """What the relay says, apart from the prompts themselves (see forms)."""
+from .model import AT_MAC, CLOSED
 
 CHECK = "\N{CHECK MARK}"
 
@@ -31,3 +32,7 @@ AWAY_OFF = "Away switch off: prompts come here once the Mac is idle."
 BACK_AT_MAC = "You're back at the Mac; answer there."
 UNREADABLE = "Couldn't read that; try again."
 TIMED_OUT = "Timed out; answer on the Mac."
+STOPPED = {  # the notice on a waiting prompt whose listener hooks.quiet stopped
+    AT_MAC: "Answered at the Mac; replies here no longer reach this session.",
+    CLOSED: "The session closed; replies here no longer reach it.",
+}

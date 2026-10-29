@@ -22,7 +22,8 @@ It works in any Claude Code session (desktop app, terminal, IDE) because it is a
   change and Claude keeps planning with your reply as feedback.
 - **Conversation:** when a session finishes a turn while you're away, its last message comes to Signal. Reply
   (quote it if several sessions wrote) and the session wakes with your reply as its next instruction, then
-  answers you the same way. Typing at the Mac or closing the session stops it listening.
+  answers you the same way. Typing at the Mac or closing the session stops it listening, and Signal gets a short
+  notice that replies to that message no longer reach the session.
 
 It only relays while you're away: if your Mac has had keyboard or mouse input in the last 60 seconds, Claude Code
 shows its normal prompt. If you come back while a prompt is waiting on Signal, it hands the prompt back to the Mac.
@@ -127,8 +128,9 @@ otherwise `~/.config/signal-plugin-cc`) when it ends. A prompt line has the keys
 `question`, `plan`, `continue`), `tag`, `session`, `outcome` and `waited` (seconds). The outcome is one of:
 
 - `answered`, `timed out`, `back at the Mac` or `stream ended`;
-- `quieted`: a finished session stopped listening because you typed at the Mac, a new turn ended or the
-  session closed;
+- `answered at the Mac` or `session closed`: a finished session's message was waiting on Signal when you typed
+  a prompt in that session at the Mac, or the session closed; Signal gets a short notice tagged to the message;
+- `quieted`: a finished session stopped listening for another reason, such as a new turn ending;
 - `send failed`: the prompt's message could not be sent;
 - `error`: anything else, such as an unreachable daemon.
 

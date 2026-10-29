@@ -5,7 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ..domain.model import AT_MAC, CLOSED, Stopped
+
 RELAY = Path(__file__).resolve().parents[2] / "relay.py"
+SIGNALS = {None: signal.SIGTERM, AT_MAC: signal.SIGUSR1, CLOSED: signal.SIGUSR2}  # why a listener stops
 
 
 def is_relay(pid):
@@ -32,9 +35,10 @@ def headless():
     return bool({"-p", "--print"} & set(args)) and not streaming
 
 
-def stop(pid):
+def stop(pid, why=None):
+    """Stop a relay process, telling it why (see exit_on_sigterm)."""
     if pid and is_relay(pid):
-        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, SIGNALS[why])
 
 
 def spawn(command, log):
@@ -46,5 +50,11 @@ def spawn(command, log):
 
 
 def exit_on_sigterm():
-    """Turn SIGTERM into SystemExit, so finally blocks (releasing a prompt, closing polls) run."""
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    """Turn the signals stop sends into Stopped (a SystemExit with status 0) carrying why, so finally
+    blocks (releasing a prompt, closing polls) run."""
+    for why, sig in SIGNALS.items():
+        signal.signal(sig, lambda *_, why=why: _raise(Stopped(why)))
+
+
+def _raise(error):
+    raise error
