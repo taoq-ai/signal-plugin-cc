@@ -101,6 +101,21 @@ for your number (and the bot's). Plan approval (ExitPlanMode) is never relayed; 
 - signal-cli is an unofficial client; a Signal protocol change can break it until signal-cli updates.
 - Signal deregisters accounts that stay unused for a long time; keep at least one session running now and then.
 
+## Architecture
+
+Ports and adapters. Each layer imports only from the layers above it in this list, and
+`tests/test_architecture.py` fails on any import that points outward.
+
+| Layer | Holds |
+|---|---|
+| `signal_cc/domain` | The rules, with no I/O: which prompt a reply belongs to (`routing`), how replies read as answers (`forms`), what the relay says (`texts`). |
+| `signal_cc/ports.py` | What the use cases need: `Messenger`, `Registry`, `Presence`. |
+| `signal_cc/app` | The use cases: ask the owner, continue a finished session, answer `status`. |
+| `signal_cc/adapters` | signal-cli over HTTP, state files under the config home, macOS idle time, the relay's processes. |
+| `signal_cc/entry` | The Claude Code hooks and the desk, and `wiring.py`, the one place that picks adapters. |
+
+Domain and use-case tests run against in-memory fakes; adapter tests run against a stub signal-cli daemon.
+
 ## Development
 
 ```bash
