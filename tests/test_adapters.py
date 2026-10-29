@@ -16,7 +16,7 @@ from unittest import mock
 from pathlib import Path
 
 from support import OWNER, ROOT, Reply, StubDaemon, serve
-from signal_cc.adapters import files, macos, processes, signal_cli
+from signal_cc.adapters import files, macos, private, processes, signal_cli
 from signal_cc.adapters.files import AwaySwitch, DeskLock, FileJournal, FileRegistry, Listeners
 from signal_cc.adapters.signal_cli import SignalCli
 from signal_cc.app import conversation
@@ -416,6 +416,37 @@ class PrivateHomeTest(Base):
         self.assertEqual({str(p.relative_to(outside)): p.read_text() for p in outside.rglob("*") if p.is_file()},
                          {name: "kept" for name in ("relay.log", "last", "away", "desk.lock", "daemon.log",
                                                     "listeners/s1.pid")})
+
+    def test_a_symlinked_listeners_folder_is_not_written_through(self):
+        home, outside = self.home / "home", self.home / "outside"
+        home.mkdir(mode=0o700)
+        outside.mkdir()
+        (home / "listeners").symlink_to(outside)
+        with self.assertRaises(OSError):
+            Listeners(home).set("s1", 123)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_the_daemon_log_alone_creates_a_private_home(self):
+        with mock.patch.object(processes.subprocess, "Popen"), mock.patch.object(signal_cli.subprocess, "Popen"):
+            processes.spawn("desk", self.home / "a" / "daemon.log")
+            SignalCli(replace(self.cfg, home=self.home / "b")).start()
+        self.assertEqual([stat.S_IMODE((self.home / h).stat().st_mode) for h in "ab"], [0o700, 0o700])
+
+    def test_a_shorter_pid_or_tag_replaces_a_longer_one_whole(self):
+        listeners, registry = Listeners(self.home), FileRegistry(self.home)
+        listeners.set("s", 12345)
+        listeners.set("s", 7)
+        registry.mark_latest("abcdef")
+        registry.mark_latest("ab")
+        self.assertEqual((listeners.get("s"), registry.latest()), (7, "ab"))
+
+    def test_sessions_appending_at_once_keep_every_line(self):
+        path = self.home / "relay.log"
+        with private.open_file(path, "a") as first, private.open_file(path, "a") as second:  # both open, then write
+            first.write("one\n")
+            first.flush()
+            second.write("two\n")
+        self.assertEqual(path.read_text(), "one\ntwo\n")
 
     def test_a_prompt_logged_through_a_planted_symlink_leaves_the_target_and_the_hook_quiet(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as elsewhere:
