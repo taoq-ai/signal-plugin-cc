@@ -273,13 +273,15 @@ class HooksTest(Base):
         self.assertEqual((line["kind"], line["session"], line["outcome"]), ("continue", "s1", "quieted"))
 
     def test_a_listener_stopped_by_a_prompt_at_the_mac_tells_signal(self):
-        before = signal.getsignal(signal.SIGUSR1)
+        sigs = (signal.SIGTERM, signal.SIGUSR1, signal.SIGUSR2)  # listen installs a handler for each
+        before = {sig: signal.getsignal(sig) for sig in sigs}
         threading.Timer(1.0, lambda: os.kill(os.getpid(), signal.SIGUSR1)).start()  # what quiet sends it
         try:
             with self.assertRaises(SystemExit) as stopped:
                 hooks.listen(self.cfg, {"session_id": "s1", "cwd": "/x/proj", "last_assistant_message": "Done."})
         finally:
-            signal.signal(signal.SIGUSR1, before)
+            for sig, handler in before.items():
+                signal.signal(sig, handler)
         self.assertEqual(stopped.exception.code, 0)
         sends = [params["message"] for method, params in StubDaemon.calls if method == "send"]
         self.assertEqual(len(sends), 2)

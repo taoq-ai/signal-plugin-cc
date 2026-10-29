@@ -256,15 +256,18 @@ class StoppedTest(unittest.TestCase):
                 self.assertEqual(journal.lines[0]["outcome"], name)
 
     def test_a_notice_that_cannot_be_sent_still_ends_quietly(self):
-        m, journal = FakeMessenger(), FakeJournal()
+        for error in (OSError("connection refused"), RuntimeError("daemon refused")):  # signal_cli raises both
+            with self.subTest(error=type(error).__name__):
+                m, journal = FakeMessenger(), FakeJournal()
 
-        def stop_then_fail(timeout):
-            m.fail_sends = True
-            raise Stopped(AT_MAC)
-        m.replies.get = stop_then_fail
-        with self.assertRaises(SystemExit):
-            continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
-        self.assertEqual(journal.lines[0]["outcome"], "answered at the Mac")
+                def stop_then_fail(timeout):
+                    m.send = lambda text: (_ for _ in ()).throw(error)
+                    raise Stopped(AT_MAC)
+                m.replies.get = stop_then_fail
+                with self.assertRaises(SystemExit) as stopped:
+                    continue_session(conv(m, journal=journal), ContinueForm("Done.", "proj"), grace=5, wait=10)
+                self.assertEqual(stopped.exception.code, 0)
+                self.assertEqual(journal.lines[0]["outcome"], "answered at the Mac")
 
 
 class DeskTest(unittest.TestCase):
