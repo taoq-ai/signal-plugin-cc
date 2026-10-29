@@ -6,7 +6,7 @@
   },
   "plugins": [
     {
-      "name": "signal",
+      "name": "signal-relay",
       "source": "./",
       "description": "Answer Claude Code permission prompts and questions from Signal while you're away from your Mac."
     }

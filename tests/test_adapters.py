@@ -229,6 +229,31 @@ class HooksTest(Base):
         self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow"})
         self.assertIn("Bash in proj", StubDaemon.calls[0][1]["message"])
 
+    def test_plan_feedback_end_to_end(self):
+        plan = {"plan": "1. Write hello.txt", "planFilePath": "/p/plan.md"}
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {"message": "add a migration step",
+                                                                                 "quote": {"id": ts}}})
+        out = hooks.permission(self.cfg, {"tool_name": "ExitPlanMode", "cwd": "/x/proj", "tool_input": plan})
+        self.assertEqual(out["hookSpecificOutput"], {"hookEventName": "PermissionRequest", "decision": {
+            "behavior": "deny", "message": "Keep planning. The owner replied from Signal: add a migration step"}})
+        self.assertIn("Plan from proj", StubDaemon.calls[0][1]["message"])
+        self.assertEqual(StubDaemon.calls[1][0], "sendPollCreate")
+
+    def test_a_plan_is_approved_with_its_input(self):
+        plan = {"plan": "1. Write hello.txt", "planFilePath": "/p/plan.md"}
+        self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {
+            "reaction": {"emoji": "\N{THUMBS UP SIGN}", "targetSentTimestamp": ts}}})
+        out = hooks.permission(self.cfg, {"tool_name": "ExitPlanMode", "cwd": "/x/proj", "tool_input": plan})
+        self.assertEqual(out["hookSpecificOutput"]["decision"], {"behavior": "allow", "updatedInput": plan})
+        [line] = [json.loads(row) for row in (self.home / "relay.log").read_text().splitlines()]
+        self.assertEqual((line["kind"], line["outcome"]), ("plan", "answered"))
+
+    def test_ask_user_question_is_left_to_the_question_hook(self):
+        qs = {"questions": [{"question": "Which db?", "options": [{"label": "Postgres"}, {"label": "Mongo"}]}]}
+        self.assertIsNone(hooks.permission(self.cfg, {"tool_name": "AskUserQuestion", "cwd": "/x/proj",
+                                                      "tool_input": qs}))
+        self.assertEqual(StubDaemon.calls, [])
+
     def test_the_log_holds_the_outcome_but_no_message_text_or_number(self):
         self.answer_next_send(lambda ts: {"sourceNumber": OWNER, "dataMessage": {
             "message": "\N{THUMBS UP SIGN}", "quote": {"id": ts}}})
