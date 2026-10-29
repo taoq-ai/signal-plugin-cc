@@ -17,6 +17,10 @@ def project(hook):
     return os.path.basename(hook.get("cwd", "")) or "Claude Code"
 
 
+def session_id(hook):
+    return hook.get("session_id", "unknown")
+
+
 def permission(cfg, hook):
     """PermissionRequest: allow or deny a tool call, or approve a plan (ExitPlanMode)."""
     tool, tool_input = hook["tool_name"], hook.get("tool_input", {})
@@ -24,13 +28,13 @@ def permission(cfg, hook):
         return None
     form = PlanForm(tool_input, project(hook)) if tool == "ExitPlanMode" \
         else PermissionForm(tool, tool_input, project(hook))
-    decision = wiring.conversation(cfg).ask(form)
+    decision = wiring.conversation(cfg, session_id(hook)).ask(form)
     return decision and {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
 
 
 def question(cfg, hook):
     """PreToolUse on AskUserQuestion: answer the questions."""
-    answers = wiring.conversation(cfg).ask(QuestionForm(hook["tool_input"]["questions"], project(hook)))
+    answers = wiring.conversation(cfg, session_id(hook)).ask(QuestionForm(hook["tool_input"]["questions"], project(hook)))
     return answers and {"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "allow",
         "updatedInput": {**hook["tool_input"], "answers": answers}}}
@@ -39,7 +43,7 @@ def question(cfg, hook):
 def quiet(cfg, hook):
     """UserPromptSubmit and SessionEnd: stop this session's listener, so a late Signal reply can't wake it.
     A prompt typed at the Mac also turns the away switch off; a turn woken from Signal does not."""
-    listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
+    listeners, session = wiring.listeners(cfg), session_id(hook)
     pid = listeners.get(session)
     listeners.clear(session)
     processes.stop(pid)
@@ -51,11 +55,11 @@ def listen(cfg, hook):
     """Stop, in the background with asyncRewake: once the owner is away, send Claude's last message and
     wake the session with the reply by exiting 2 with it on stderr."""
     quiet(cfg, hook)  # replace the listener of the session's previous turn
-    listeners, session = wiring.listeners(cfg), hook.get("session_id", "unknown")
+    listeners, session = wiring.listeners(cfg), session_id(hook)
     listeners.set(session, os.getpid())
     processes.exit_on_sigterm()  # quieted: let the conversation clean up
     try:
-        reply = continue_session(wiring.conversation(cfg),
+        reply = continue_session(wiring.conversation(cfg, session),
                                  ContinueForm(hook.get("last_assistant_message"), project(hook)),
                                  grace=cfg.wait, wait=cfg.listen)
     finally:
