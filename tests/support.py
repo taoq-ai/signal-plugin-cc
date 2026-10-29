@@ -80,6 +80,13 @@ class FakeRegistry:
 class FakePresence:
     def __init__(self, away=True, returned=False):
         self._away, self._returned = away, returned
+        self.switch = False
+
+    def set_switch(self, on):
+        self.switch = on
+
+    def switch_on(self):
+        return self.switch
 
     def away(self):
         return self._away
